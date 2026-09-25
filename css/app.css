@@ -23,7 +23,12 @@
   --warn-bg: #fff8c5;
   --warn-border: #d4a72c;
   --ok: #1a7f37;
-  --sidebar-w: 320px;
+  /* 25% of the viewport, not a fixed 320px: at a 1024px window that was 31% of
+     the screen spent on file names, and the ratio is what reads wrong, not the
+     pixels. The floor keeps the tree usable in a narrow desktop window (below
+     ~960px 25% would be thinner than a filename) and the ceiling stops a
+     sidebar on an ultra-wide monitor from becoming a wall. */
+  --sidebar-w: clamp(15rem, 25vw, 23rem);
   --topbar-h: 48px;
 }
 

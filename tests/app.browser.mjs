@@ -859,7 +859,43 @@ const drafts = await page.evaluate(() => Object.keys(localStorage).filter((k) =>
 ok('exactly one draft exists, keyed to the edited file',
   drafts.length === 1 && drafts[0].includes('یادداشت'), drafts.join(','));
 
-// ------------------------------------------- 16. a reload keeps the settings
+// ------------------------------------------------- 16. sidebar width ratio
+// The reported problem was a fixed 320px sidebar: 31% of a 1024px window spent
+// on file names. It is a share of the viewport now, so the ratio is what gets
+// asserted — not a pixel count that would drift with the clamp bounds.
+mark('sidebar width');
+const sidebarAt = [];
+for (const width of [1440, 1280, 1024, 900]) {
+  await page.setViewport({ width, height: 900 });
+  await wait(450);
+  sidebarAt.push(await page.evaluate((vw) => {
+    const box = document.getElementById('app-sidebar').getBoundingClientRect();
+    const tree = document.getElementById('file-tree');
+    return {
+      vw,
+      px: Math.round(box.width),
+      pct: Math.round((box.width / vw) * 1000) / 10,
+      treeW: tree ? Math.round(tree.clientWidth) : 0,
+      // nothing may be pushed off the page by the grid column
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  }, width));
+}
+const pctAt = (vw) => sidebarAt.find((r) => r.vw === vw);
+
+ok('at 1024px the sidebar is 25% of the window, not 31%',
+  Math.abs(pctAt(1024).pct - 25) < 0.6, JSON.stringify(pctAt(1024)));
+ok('the share holds as the window grows (25%, not a fixed width)',
+  Math.abs(pctAt(1280).pct - 25) < 0.6 && Math.abs(pctAt(1440).pct - 25) < 0.6,
+  JSON.stringify([pctAt(1280), pctAt(1440)]));
+ok('a narrow desktop window keeps the floor, not 25% of almost nothing',
+  pctAt(900).px >= 240 && pctAt(900).pct <= 27, JSON.stringify(pctAt(900)));
+ok('the file tree still has room for a filename at every width',
+  sidebarAt.every((r) => r.treeW > 180), JSON.stringify(sidebarAt.map((r) => r.treeW)));
+ok('and the narrower column never pushes the page sideways',
+  sidebarAt.every((r) => r.pageOverflow === 0), JSON.stringify(sidebarAt.map((r) => r.pageOverflow)));
+
+// ------------------------------------------- 17. a reload keeps the settings
 // The only honest proof that a preference is remembered: throw the page away.
 // window.__editor exists from boot (the editor is wired before login), and the
 // test handle is re-installed by evaluateOnNewDocument, so this needs no session.
