@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ویرایشگر مارک‌داون</title>
+<meta name="description" content="ویرایشگر مارک‌داون فارسی روی مخزن‌های گیت‌هاب">
+
+<!-- GitHub Pages cannot set CSP headers, so it goes in a meta tag.
+     No third-party origin appears anywhere in this app: every script, font and
+     stylesheet is vendored.
+       * 'self' is listed in connect-src explicitly — naming a directive stops it
+         falling back to default-src, which would otherwise block same-origin fetch.
+       * frame-ancestors is deliberately absent: browsers ignore it in a <meta>
+         tag, and GitHub Pages gives us no way to send it as a header. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://raw.githubusercontent.com https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com https://raw.githubusercontent.com; form-action 'none'; base-uri 'none'">
+
+<!-- data: URI so there is no 404 in the console on every load. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230969da'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'%3E%E2%80%8F%E2%9C%8E%3C/text%3E%3C/svg%3E">
+
+<link rel="preload" href="fonts/Vazirmatn[wght].woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/app.css?v=1">
+</head>
+<body>
+
+<!-- ============================================================ login view -->
+<main id="login-view" class="login" hidden>
+  <form id="login-form" class="login-card" autocomplete="off">
+    <h1>ویرایشگر مارک‌داون</h1>
+    <p class="muted">برای خواندن و نوشتن روی مخزن‌های گیت‌هاب به یک توکن نیاز است.</p>
+
+    <label for="token-input">توکن دسترسی شخصی (PAT)</label>
+    <input id="token-input" type="password" dir="ltr" spellcheck="false"
+           autocomplete="off" placeholder="github_pat_… یا ghp_…" required>
+
+    <p class="hint">
+      مجوزهای لازم: <b>Contents: Read and write</b> و <b>Metadata: Read-only</b>.
+      توکن را فقط روی مخزن‌هایی که لازم دارید محدود کنید.
+    </p>
+
+    <label class="check">
+      <input id="remember" type="checkbox">
+      <span>مرا به خاطر بسپار (وگرنه توکن با بستن زبانه پاک می‌شود)</span>
+    </label>
+
+    <button id="login-btn" type="submit">ورود</button>
+    <p id="login-error" class="error" role="alert" hidden></p>
+
+    <p class="hint small">
+      توکن در حافظهٔ مرورگر همین دامنه نگه داشته می‌شود و هرگز به جای دیگری فرستاده
+      نمی‌شود. اگر این صفحه روی <code>*.github.io</code> باشد، آن حافظه با بقیهٔ
+      سایت‌های Pages همان دامنه مشترک است — دامنهٔ اختصاصی امن‌تر است.
+    </p>
+  </form>
+</main>
+
+<!-- ============================================================== app view -->
+<div id="app-view" class="app" hidden>
+
+  <header class="topbar">
+    <button id="sidebar-toggle" type="button" class="icon-btn"
+            aria-label="نمایش/پنهان کردن نوار کناری" title="نوار کناری">☰</button>
+
+    <span id="path-label" class="path-label" dir="auto"></span>
+    <span id="dirty-dot" class="dirty" title="تغییرات ثبت‌نشده" hidden>●</span>
+    <span id="counts" class="counts"></span>
+
+    <span class="spacer"></span>
+
+    <div class="mode-group" role="group" aria-label="حالت نمایش">
+      <button id="mode-edit"    type="button" aria-pressed="true">ویرایش</button>
+      <button id="mode-split"   type="button" aria-pressed="false">کنار هم</button>
+      <button id="mode-preview" type="button" aria-pressed="false">پیش‌نمایش</button>
+    </div>
+
+    <button id="find-open" type="button" title="جست‌وجو (Ctrl+F)">جست‌وجو</button>
+    <button id="btn-new-file" type="button" title="فایل جدید">فایل جدید</button>
+    <button id="commit-btn" type="button" class="primary commit-action-btn" title="ثبت تغییرات (Ctrl+S)" disabled>کامیت</button>
+
+    <span class="user">
+      <img id="user-avatar" alt="" width="22" height="22">
+      <span id="user-login"></span>
+      <button id="logout-btn" type="button" class="link-btn">خروج</button>
+    </span>
+  </header>
+
+  <!-- ------------------------------------------------------------- sidebar -->
+  <aside class="sidebar" aria-label="مخزن‌ها و فایل‌ها">
+    <div class="side-head">
+      <input id="repo-filter" type="search" placeholder="فیلتر مخزن‌ها…" dir="auto">
+      <button id="refresh-repos" type="button" class="icon-btn" title="بارگذاری دوباره">⟳</button>
+    </div>
+    <div id="repo-list" class="repo-list" role="list"></div>
+    <p id="repo-status" class="side-status"></p>
+
+    <div class="side-head branch-row">
+      <label for="branch-select" class="visually-hidden">شاخه</label>
+      <select id="branch-select" disabled></select>
+    </div>
+    <div class="side-head">
+      <input id="file-filter" type="search" placeholder="فیلتر فایل‌ها…" dir="auto">
+    </div>
+    <nav id="file-tree" class="file-tree" aria-label="فایل‌ها"></nav>
+    <p id="tree-status" class="side-status"></p>
+    <p id="ratelimit" class="side-status ratelimit" hidden></p>
+  </aside>
+  <div id="sidebar-overlay" class="sidebar-overlay" aria-hidden="true"></div>
+
+  <!-- --------------------------------------------------------- main column -->
+  <div class="main">
+
+    <div id="find-bar" class="find-bar" hidden>
+      <label class="visually-hidden" for="find-input">جست‌وجو</label>
+      <input id="find-input" type="text" placeholder="جست‌وجو در متن…" dir="auto" autocomplete="off">
+      <span id="find-status" class="find-status"></span>
+      <button id="find-case" type="button" class="btn-toggle" title="حساس به بزرگی و کوچکی حروف" aria-pressed="false">حساس به حروف</button>
+      <button id="find-prev" type="button" title="قبلی (Shift+Enter)" disabled>قبلی</button>
+      <button id="find-next" type="button" title="بعدی (Enter)" disabled>بعدی</button>
+
+      <span class="find-divider" aria-hidden="true"></span>
+
+      <label class="visually-hidden" for="replace-input">جایگزینی</label>
+      <input id="replace-input" type="text" placeholder="جایگزینی با…" dir="auto" autocomplete="off">
+      <button id="replace-one" type="button" disabled>جایگزینی</button>
+      <button id="replace-all" type="button" disabled>جایگزینی در کل متن</button>
+      <button id="find-close" type="button" class="icon-btn" title="بستن (Esc)" aria-label="بستن">✕</button>
+    </div>
+
+    <div id="readonly-banner" class="banner warn" hidden>
+      <strong>فقط خواندنی.</strong> <span id="readonly-why"></span>
+    </div>
+
+    <div class="panes">
+      <div id="editor-pane" class="pane editor-pane">
+        <div id="editor-toolbar" class="editor-toolbar" role="toolbar" aria-label="قالب‌بندی متن">
+          <button type="button" class="tb-btn" data-action="h1" title="سرفصل ۱ (H1)">H1</button>
+          <button type="button" class="tb-btn" data-action="h2" title="سرفصل ۲ (H2)">H2</button>
+          <button type="button" class="tb-btn" data-action="h3" title="سرفصل ۳ (H3)">H3</button>
+          <span class="tb-sep"></span>
+          <button type="button" class="tb-btn tb-bold" data-action="bold" title="تیره / ضخیم (Ctrl+B)">B</button>
+          <button type="button" class="tb-btn tb-italic" data-action="italic" title="کج / تأکید (Ctrl+I)">I</button>
+          <button type="button" class="tb-btn tb-strike" data-action="strike" title="خط‌خورده">S</button>
+          <span class="tb-sep"></span>
+          <button type="button" class="tb-btn" data-action="ul" title="فهرست نشانه‌دار">• فهرست</button>
+          <button type="button" class="tb-btn" data-action="ol" title="فهرست شماره‌دار">1. شماره‌دار</button>
+          <button type="button" class="tb-btn" data-action="task" title="فهرست کارها / چک‌لیست">☑ کارها</button>
+          <span class="tb-sep"></span>
+          <button type="button" class="tb-btn" data-action="quote" title="نقل‌قول">&gt; نقل‌قول</button>
+          <button type="button" class="tb-btn" data-action="code" title="کد درون‌خطی">&lt;/&gt;</button>
+          <button type="button" class="tb-btn" data-action="codeblock" title="بلوک کد">بلوک کد</button>
+          <button type="button" class="tb-btn" data-action="table" title="جدول">جدول</button>
+          <button type="button" class="tb-btn" data-action="link" title="پیوند (Ctrl+K)">پیوند</button>
+        </div>
+        <div class="editor-body">
+          <div id="gutter" class="editor-gutter" aria-hidden="true">
+            <div id="gutter-inner" class="gutter-inner"></div>
+          </div>
+          <div class="editor-stage">
+            <div id="editor-backdrop" class="editor-backdrop" aria-hidden="true"><div id="search-highlights" class="search-highlights"></div></div>
+          <!-- dir="auto" makes the browser resolve direction per paragraph from the
+               first strong character, which is what handles mixed Persian/English.
+               It also implies unicode-bidi: plaintext on a textarea. -->
+          <textarea id="editor" dir="auto" spellcheck="false" wrap="off"
+                    aria-label="متن مارک‌داون" placeholder="فایلی از نوار کناری انتخاب کنید…"></textarea>
+          </div>
+        </div>
+      </div>
+      <div id="preview-pane" class="pane preview-pane" hidden>
+        <div id="preview" class="md-body"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- ------------------------------------------------------------- dialogs -->
+<dialog id="commit-dialog" class="dlg commit-dlg">
+  <form id="commit-form" method="dialog">
+    <div class="dlg-header">
+      <h2>ثبت تغییرات (Commit)</h2>
+      <p id="commit-target-info" class="hint"></p>
+    </div>
+
+    <div class="form-group">
+      <label for="commit-message">عنوان تغییرات <span class="required">*</span></label>
+      <input id="commit-message" type="text" dir="auto" autocomplete="off"
+             placeholder="خلاصهٔ کوتاه از تغییرات انجام‌شده" required>
+    </div>
+
+    <div class="form-group">
+      <label for="commit-description">توضیحات تکمیلی (اختیاری)</label>
+      <textarea id="commit-description" dir="auto" rows="4"
+                placeholder="توضیحات بیشتر دربارهٔ چرایی یا جزئیات این تغییرات…"></textarea>
+    </div>
+
+    <div class="form-group commit-branch-section">
+      <label class="commit-branch-label">
+        <span class="commit-branch-icon">⎇</span>
+        ثبت مستقیم روی شاخهٔ <strong id="commit-branch-name" class="mono"></strong>
+      </label>
+    </div>
+
+    <div class="dlg-actions">
+      <button id="commit-cancel" type="button">انصراف</button>
+      <button type="submit" class="primary" id="commit-submit-btn">ثبت تغییرات</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="newfile-dialog" class="dlg">
+  <form id="newfile-form" method="dialog">
+    <h2>فایل جدید</h2>
+    <label for="newfile-path">مسیر کامل داخل مخزن</label>
+    <input id="newfile-path" type="text" dir="ltr" autocomplete="off"
+           placeholder="notes/یادداشت.md" required>
+    <p class="hint small">پوشه‌ها خودکار ساخته می‌شوند. برای باز کردن یک فایل موجود، همان مسیر را بنویسید.</p>
+    <div class="dlg-actions">
+      <button id="newfile-cancel" type="button">لغو</button>
+      <button type="submit" class="primary">ایجاد</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Vendored UMD libraries. Classic scripts on purpose: the plugin builds are
+     CommonJS/UMD, so a bare ESM import of them would throw. -->
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/marked-footnote.umd.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script type="module" src="js/app.mjs?v=1"></script>
+
+</body>
+</html>
+
+

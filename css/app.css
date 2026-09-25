@@ -1,0 +1,738 @@
+/* css/app.css — RTL-first. Logical properties throughout; physical left/right
+   appears only where the meaning is genuinely physical (code alignment). */
+
+/* ------------------------------------------------------------------ font */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../fonts/Vazirmatn[wght].woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --bg: #ffffff;
+  --bg-alt: #f6f8fa;
+  --bg-inset: #f0f1f3;
+  --border: #d0d7de;
+  --fg: #1f2328;
+  --fg-muted: #57606a;
+  --accent: #0969da;
+  --accent-fg: #ffffff;
+  --danger: #cf222e;
+  --warn-bg: #fff8c5;
+  --warn-border: #d4a72c;
+  --ok: #1a7f37;
+  --sidebar-w: 320px;
+  --topbar-h: 48px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --bg-alt: #161b22;
+    --bg-inset: #21262d;
+    --border: #30363d;
+    --fg: #e6edf3;
+    --fg-muted: #8b949e;
+    --accent: #2f81f7;
+    --warn-bg: #2d2404;
+    --warn-border: #9e6a03;
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* display:grid / display:flex on an element OVERRIDES the UA's
+   `[hidden] { display: none }` — without this line the login card, the find
+   bar and the app shell would all render even while "hidden". */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+/* Form controls do NOT inherit font-family. This is the single easiest thing
+   to miss in a webfont setup. */
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* 16px minimum, or iOS zooms the page on focus. */
+input, select, textarea { font-size: 16px; }
+
+button {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+}
+button:hover:not(:disabled) { background: var(--bg-inset); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.icon-btn { padding: 0.3rem 0.5rem; line-height: 1; }
+.link-btn { border: 0; background: none; color: var(--accent); padding: 0; }
+.muted { color: var(--fg-muted); }
+.spacer { flex: 1; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ------------------------------------------------------------------ login */
+.login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: var(--bg-alt);
+}
+.login-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.75rem;
+  width: min(30rem, 100%);
+  display: grid;
+  gap: 0.6rem;
+}
+.login-card h1 { margin: 0 0 0.25rem; font-size: 1.35rem; }
+.login-card label { font-weight: 600; }
+.login-card input[type="password"] {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.check { display: flex; gap: 0.5rem; align-items: center; font-weight: 400; }
+.hint { font-size: 0.85rem; color: var(--fg-muted); margin: 0; }
+.hint.small { font-size: 0.78rem; }
+.error { color: var(--danger); margin: 0; font-size: 0.9rem; }
+
+/* -------------------------------------------------------------------- app */
+.app {
+  height: 100dvh;
+  display: grid;
+  /* In RTL the first grid column is the RIGHT one, so the sidebar lands on the
+     right with no ordering hack. */
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: var(--topbar-h) 1fr;
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main";
+}
+body.sidebar-collapsed .app {
+  grid-template-columns: 1fr;
+  grid-template-areas: "topbar" "main";
+}
+body.sidebar-collapsed .sidebar { display: none; }
+
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-inline: 0.6rem;
+  border-block-end: 1px solid var(--border);
+  background: var(--bg-alt);
+  overflow: hidden;
+}
+.path-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 34ch;
+  unicode-bidi: plaintext;
+}
+.dirty { color: var(--danger); }
+.counts { font-size: 0.78rem; color: var(--fg-muted); white-space: nowrap; }
+.mode-group { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.mode-group button { border: 0; border-radius: 0; background: var(--bg-alt); }
+.mode-group button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+#save-btn:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.user { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+.user img { border-radius: 50%; }
+
+/* ---------------------------------------------------------------- sidebar */
+.sidebar {
+  grid-area: sidebar;
+  border-inline-end: 1px solid var(--border);
+  background: var(--bg-alt);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.side-head {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.4rem;
+  align-items: center;
+}
+.side-head input, .side-head select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.branch-row { border-block-start: 1px solid var(--border); }
+.repo-list { overflow-y: auto; max-height: 34vh; padding-inline: 0.4rem; }
+.repo-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  text-align: start;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  padding: 0.28rem 0.5rem;
+  font-size: 0.88rem;
+}
+.repo-item:hover { background: var(--bg-inset); }
+.repo-item.active { background: var(--accent); color: var(--accent-fg); }
+.repo-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.repo-owner { color: var(--fg-muted); font-size: 0.75rem; }
+.repo-item.active .repo-owner { color: inherit; opacity: 0.85; }
+.badge {
+  font-size: 0.68rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 0.35rem;
+  opacity: 0.75;
+}
+.side-status { font-size: 0.75rem; color: var(--fg-muted); padding-inline: 0.6rem; margin: 0.25rem 0; }
+.ratelimit.warn { color: var(--danger); }
+
+.file-tree { flex: 1; overflow-y: auto; padding-inline: 0.25rem 0.4rem; }
+.tree { list-style: none; margin: 0; padding-inline-start: 0.75rem; }
+.file-tree > .tree { padding-inline-start: 0; }
+.tree.flat { padding-inline-start: 0; }
+.tree-toggle {
+  display: flex; align-items: center; gap: 0.3rem;
+  width: 100%; text-align: start;
+  border: 0; background: none; border-radius: 5px;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.86rem; font-weight: 600;
+}
+.tree-toggle:hover { background: var(--bg-inset); }
+.twisty { font-size: 0.7rem; color: var(--fg-muted); width: 0.8em; }
+.dir-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-file-btn {
+  display: block; width: 100%; text-align: start;
+  border: 0; background: none; border-radius: 5px;
+  padding: 0.12rem 0.35rem;
+  font-size: 0.84rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  unicode-bidi: plaintext;
+}
+.tree-file-btn:hover { background: var(--bg-inset); }
+.tree-file-btn.active { background: var(--accent); color: var(--accent-fg); }
+.tree-file.non-md .tree-file-btn { opacity: 0.55; }
+.empty { font-size: 0.82rem; color: var(--fg-muted); padding: 0.5rem; }
+
+/* ------------------------------------------------------------------- main */
+.main { grid-area: main; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+.find-bar {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  border-block-end: 1px solid var(--border);
+  background: var(--bg-alt);
+  flex-wrap: wrap;
+}
+.find-bar input {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  min-width: 10rem;
+  flex: 1 1 8rem;
+}
+.find-status { font-size: 0.78rem; color: var(--fg-muted); white-space: nowrap; min-width: 5ch; }
+
+.banner { padding: 0.5rem 0.8rem; font-size: 0.88rem; }
+.banner.warn { background: var(--warn-bg); border-block-end: 1px solid var(--warn-border); }
+
+.panes {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 0;
+}
+body.mode-split .panes { grid-template-columns: 1fr 1fr; }
+.pane { min-width: 0; min-height: 0; overflow: hidden; }
+.editor-pane { display: flex; }
+
+#editor {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  padding: 1rem 1.25rem;
+  background: var(--bg);
+  line-height: 1.85;
+  /* dir="auto" on the element already implies unicode-bidi: plaintext for a
+     textarea; declared again so the intent survives a copy/paste of this rule. */
+  unicode-bidi: plaintext;
+  tab-size: 2;
+}
+#editor.readonly { background: var(--bg-alt); color: var(--fg-muted); }
+
+.preview-pane { overflow-y: auto; border-inline-start: 1px solid var(--border); background: var(--bg); }
+body.mode-preview .preview-pane { border-inline-start: 0; }
+#preview { padding: 1.25rem 1.5rem; max-width: 60rem; }
+
+/* =============================================================== markdown */
+/* 🔴 unicode-bidi does NOT inherit. Setting plaintext on #preview alone does
+   nothing for the paragraphs inside it: each child would inherit
+   direction: rtl from <html> and force pure-English paragraphs RTL too.
+   Apply it to the leaf blocks. :where() keeps specificity at 0 and covers
+   nested blocks such as blockquote > p. */
+#preview :where(p, li, h1, h2, h3, h4, h5, h6, blockquote,
+                td, th, figcaption, dt, dd, summary, caption) {
+  unicode-bidi: plaintext;
+}
+
+/* Code is LTR no matter what, and must not leak direction into surrounding
+   Persian text. Without isolate, `useState(count)` inside a Persian sentence
+   gets its parentheses reordered. */
+#preview :where(pre, code) { direction: ltr; text-align: left; }
+#preview :where(pre) {
+  overflow: auto;
+  unicode-bidi: isolate;
+  padding: 0.75rem 1rem;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  line-height: 1.5;
+}
+#preview :where(code) {
+  unicode-bidi: isolate;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+               'Liberation Mono', monospace;
+  font-size: 0.88em;
+}
+#preview :where(:not(pre) > code) {
+  padding: 0.12em 0.35em;
+  background: var(--bg-inset);
+  border-radius: 4px;
+}
+
+#preview :where(h1, h2) { border-block-end: 1px solid var(--border); padding-block-end: 0.3em; }
+#preview :where(h1, h2, h3, h4, h5, h6) { margin-block: 1.2em 0.5em; line-height: 1.35; }
+#preview :where(p, ul, ol, blockquote, table, pre) { margin-block: 0.9em; }
+#preview :where(img) { max-width: 100%; height: auto; }
+#preview :where(hr) { border: 0; border-block-start: 1px solid var(--border); margin-block: 1.5em; }
+#preview :where(a) { color: var(--accent); }
+
+#preview :where(blockquote) {
+  margin-inline: 0;
+  padding-inline-start: 1em;
+  border-inline-start: 3px solid var(--border);
+  color: var(--fg-muted);
+}
+
+/* Tables. marked emits alignment as an `align` ATTRIBUTE, which survives the
+   sanitizer; inline style does not, so the renderer never produces it. */
+#preview :where(table) {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+#preview :where(th, td) { border: 1px solid var(--border); padding: 0.4rem 0.75rem; }
+#preview :where(th) { background: var(--bg-alt); }
+#preview :where([align="right"],  .align-right)  { text-align: right; }
+#preview :where([align="center"], .align-center) { text-align: center; }
+#preview :where([align="left"],   .align-left)   { text-align: left; }
+
+/* Task lists: marked emits the checkbox with `disabled`, and the sanitizer
+   allowlist keeps `disabled`/`checked`, so these stay read-only. */
+#preview :where(li > input[type="checkbox"]) { margin-inline-end: 0.5em; }
+
+/* Footnotes (marked-footnote, prefixId: 'fn-'). */
+#preview :where(.footnotes) { font-size: 0.9em; color: var(--fg-muted); }
+#preview :where(.footnotes hr) { margin-block: 1.5em; }
+#preview :where(.footnotes sup) { font-size: 0.75em; }
+#preview :where(sup > a) { text-decoration: none; }
+#preview :where(.footnotes li a) { text-decoration: none; margin-inline-start: 0.3em; }
+/* marked-footnote puts class="sr-only" on its screen-reader heading. */
+#preview .sr-only, .sr-only {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* YAML front matter, rendered by md.mjs as a collapsed table. */
+#preview .front-matter { margin-block: 0 1.2em; font-size: 0.88rem; }
+#preview .front-matter > summary { cursor: pointer; color: var(--fg-muted); }
+#preview .front-matter-table { display: table; }
+#preview .front-matter-table th { text-align: start; white-space: nowrap; }
+
+#preview .render-error { color: var(--danger); }
+
+/* ---------------------------------------------------------------- dialogs */
+.dlg {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem;
+  width: min(28rem, calc(100vw - 2rem));
+  background: var(--bg);
+  color: var(--fg);
+}
+.dlg::backdrop { background: rgb(0 0 0 / 0.4); }
+.dlg h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+.dlg label { display: block; font-weight: 600; margin-block-end: 0.25rem; }
+.dlg input[type="text"] {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.dlg-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-block-start: 1rem; }
+
+/* ------------------------------------------------------------------ toast */
+.toast {
+  position: fixed;
+  inset-block-end: 1rem;
+  inset-inline-start: 1rem;
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  display: none;
+  gap: 0.75rem;
+  align-items: center;
+  z-index: 50;
+}
+.toast.show { display: flex; }
+.toast.success { border-color: var(--ok); }
+.toast.error   { border-color: var(--danger); }
+.toast.warn    { background: var(--warn-bg); border-color: var(--warn-border); }
+.toast-action { white-space: nowrap; }
+
+body.busy { cursor: progress; }
+
+/* ----------------------------------------------------------------- mobile */
+/* The sidebar becomes an overlay drawer. Same .sidebar-collapsed toggle as
+   desktop, so the default state (visible) matches desktop and the button means
+   the same thing at every width. */
+/* Sidebar overlay on mobile */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 19;
+  backdrop-filter: blur(2px);
+}
+
+@media (max-width: 860px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-areas: "topbar" "main";
+  }
+  .sidebar {
+    position: fixed;
+    inset-block: var(--topbar-h) 0;
+    inset-inline-start: 0;
+    width: min(22rem, 88vw);
+    z-index: 20;
+    box-shadow: 0 0 24px rgb(0 0 0 / 0.35);
+    transition: transform 0.2s ease;
+  }
+  body:not(.sidebar-collapsed) .sidebar-overlay {
+    display: block;
+  }
+  body.sidebar-collapsed .sidebar {
+    display: none;
+  }
+  body.mode-split .panes { grid-template-columns: 1fr; }
+  body.mode-split .preview-pane { border-inline-start: 0; border-block-start: 1px solid var(--border); }
+  .counts, #user-login, #user-avatar { display: none; }
+  .path-label { max-width: 14ch; font-size: 0.82rem; }
+
+  .topbar {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-inline: 0.4rem;
+    gap: 0.3rem;
+    scrollbar-width: none;
+  }
+  .topbar::-webkit-scrollbar { display: none; }
+  .topbar button {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+
+  .editor-gutter {
+    flex: 0 0 38px;
+    width: 38px;
+    font-size: 11px;
+  }
+  .gutter-inner {
+    padding-inline-end: 4px;
+  }
+  .editor-backdrop, #editor {
+    padding: 0.75rem 0.6rem !important;
+    font-size: 15px !important;
+  }
+}
+
+
+
+
+/* ------------------------------------------------ editor layout & toolbar */
+.editor-pane {
+  display: flex !important;
+  flex-direction: column !important;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  height: 100%;
+}
+
+.editor-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-alt);
+  border-block-end: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.editor-toolbar::-webkit-scrollbar { display: none; }
+
+.tb-btn {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.tb-btn:hover {
+  background: var(--bg-inset);
+  border-color: var(--border);
+}
+.tb-btn:active {
+  background: var(--border);
+}
+.tb-bold { font-weight: 800; font-family: ui-monospace, sans-serif; }
+.tb-italic { font-style: italic; font-family: ui-monospace, sans-serif; }
+.tb-strike { text-decoration: line-through; font-family: ui-monospace, sans-serif; }
+.tb-sep {
+  display: inline-block;
+  width: 1px;
+  height: 1.1rem;
+  background: var(--border);
+  margin-inline: 0.2rem;
+  flex-shrink: 0;
+}
+
+.editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.editor-gutter {
+  flex: 0 0 52px;
+  width: 52px;
+  background: var(--bg-alt);
+  border-inline-end: 1px solid var(--border);
+  overflow: hidden;
+  user-select: none;
+  position: relative;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.85;
+  color: var(--fg-muted);
+  box-sizing: border-box;
+}
+
+.gutter-inner {
+  padding-block: 1rem;
+  padding-inline-end: 8px;
+  text-align: end;
+  box-sizing: border-box;
+}
+
+.gutter-num {
+  height: 28px;
+  line-height: 28px;
+  font-size: 13px;
+  opacity: 0.65;
+}
+
+.editor-stage {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.editor-backdrop {
+  position: absolute;
+  inset: 0;
+  padding: 1rem 1.25rem;
+  overflow: hidden;
+  white-space: pre;
+  word-wrap: normal;
+  pointer-events: none;
+  font-family: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 28px;
+  box-sizing: border-box;
+  color: transparent;
+  unicode-bidi: plaintext;
+  tab-size: 2;
+}
+
+.search-highlights {
+  color: transparent;
+  white-space: pre;
+  unicode-bidi: plaintext;
+  tab-size: 2;
+}
+
+.hl-match {
+  background-color: rgba(234, 179, 8, 0.35);
+  color: transparent;
+  border-radius: 2px;
+}
+
+.hl-selected {
+  background-color: rgba(249, 115, 22, 0.75);
+  box-shadow: 0 0 0 1px #ea580c;
+  color: transparent;
+  border-radius: 2px;
+}
+
+#editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  padding: 1rem 1.25rem;
+  background: transparent;
+  color: var(--fg);
+  font-family: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 28px;
+  unicode-bidi: plaintext;
+  tab-size: 2;
+  box-sizing: border-box;
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+
+/* ------------------------------------------------ commit dialog (GitHub-style) */
+.commit-dlg {
+  width: min(34rem, calc(100vw - 2rem));
+  padding: 1.5rem;
+}
+.commit-dlg .dlg-header {
+  margin-block-end: 1rem;
+}
+.commit-dlg .dlg-header h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.commit-dlg .form-group {
+  margin-block-end: 0.9rem;
+}
+.commit-dlg label {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-block-end: 0.3rem;
+}
+.commit-dlg .required {
+  color: var(--danger);
+}
+.commit-dlg input[type="text"],
+.commit-dlg textarea {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-sizing: border-box;
+}
+.commit-branch-section {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin-block: 0.8rem 1.2rem;
+}
+.commit-branch-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 !important;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+.commit-branch-icon {
+  font-size: 1.1rem;
+  color: var(--accent);
+}
+
+/* ------------------------------------------------ find bar buttons & divider */
+.find-divider {
+  width: 1px;
+  height: 1.2rem;
+  background: var(--border);
+  margin-inline: 0.3rem;
+}
+.btn-toggle[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+#commit-btn:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}

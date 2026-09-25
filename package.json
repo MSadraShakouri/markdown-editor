@@ -1,0 +1,13 @@
+{
+  "name": "markdown-editor-tests",
+  "private": true,
+  "type": "module",
+  "description": "Dev dependencies for tests/ only. The app itself needs no install, no build step.",
+  "scripts": {
+    "test": "node tests/renderer.test.mjs"
+  },
+  "devDependencies": {
+    "dompurify": "^3.4.16",
+    "jsdom": "^27.4.0"
+  }
+}
