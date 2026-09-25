@@ -7,6 +7,7 @@ import {
   stripBOM, hasBOM, isLFSPointer, apiPath,
 } from './github.mjs';
 import { renderMarkdown, setRenderContext, splitFrontMatter } from './md.mjs';
+import { DemoGitHub, DEMO_START_FILE } from './demo.mjs';
 
 // --------------------------------------------------------------------- state
 const S = {
@@ -30,6 +31,7 @@ const S = {
   saving: false,
   mode: 'edit',        // 'edit' | 'preview' | 'split'
   newFile: false,
+  demo: false,         // token-free session: everything works except writing
 };
 
 const $ = (id) => document.getElementById(id);
@@ -68,7 +70,9 @@ function clearToken() {
 const draftKey = () => `draft:${S.repo?.owner}/${S.repo?.name}@${S.branch}:${S.path}`;
 
 function saveDraft() {
-  if (!S.path || S.readOnly) return;
+  // Nothing in a demo session is worth keeping, and the draft key would be
+  // indistinguishable from a real repo's.
+  if (!S.path || S.readOnly || S.demo) return;
   try {
     localStorage.setItem(draftKey(), JSON.stringify({
       text: $('editor').value, baseSha: S.sha, savedAt: Date.now(),
@@ -76,6 +80,7 @@ function saveDraft() {
   } catch {}
 }
 function readDraft() {
+  if (S.demo) return null;
   try {
     const raw = localStorage.getItem(draftKey());
     return raw ? JSON.parse(raw) : null;
@@ -106,15 +111,20 @@ function toast(message, kind = 'info', actionLabel, actionFn) {
     b.addEventListener('click', () => { actionFn(); hideToast(); });
     box.appendChild(b);
   }
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, kind === 'error' ? 9000 : 4500);
+  // window.setTimeout, not the bare global: the pending timer belongs to this
+  // document and must die with it (browsers treat both identically).
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(hideToast, kind === 'error' ? 9000 : 4500);
 }
 function hideToast() { $('toast').className = 'toast'; }
 
 // ------------------------------------------------------------------ login UI
 async function showLogin(errorMessage) {
+  closeMenu();               // a <dialog> would otherwise linger in the top layer
   $('login-view').hidden = false;
   $('app-view').hidden = true;
+  document.body.classList.remove('demo');
+  $('demo-banner').hidden = true;
   if (errorMessage) {
     $('login-error').textContent = errorMessage;
     $('login-error').hidden = false;
@@ -132,6 +142,7 @@ async function doLogin() {
   try {
     const user = await gh.user();
     writeToken(token, $('remember').checked);
+    S.demo = false;
     S.gh = gh;
     S.user = user;
     await enterApp();
@@ -144,10 +155,39 @@ async function doLogin() {
   }
 }
 
+/** Token-free session: the same app, a fake transport (see js/demo.mjs). */
+async function startDemo() {
+  const btn = $('demo-btn');
+  $('login-error').hidden = true;
+  btn.disabled = true;
+  try {
+    const gh = new DemoGitHub();
+    S.demo = true;
+    S.gh = gh;
+    S.user = await gh.user();
+    await enterApp();
+  } catch (err) {
+    S.demo = false; S.gh = null;
+    $('login-error').textContent = err.message || 'اجرای نسخهٔ نمایشی ناموفق بود.';
+    $('login-error').hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** Back to the login card — from a demo session or a real one. */
 function logout() {
   clearToken();
-  S.gh = null; S.user = null; S.repo = null; S.path = null;
+  S.demo = false;
+  S.gh = null; S.user = null; S.repo = null; S.branch = null; S.tree = [];
+  S.path = null; S.sha = null; S.newFile = false; S.readOnly = false;
+  S.baseText = ''; S.dirty = false; S.readOnlyWhy = '';
+  $('editor').value = '';
+  $('path-label').textContent = '';
   $('token-input').value = '';
+  // Without this the header kept the previous session's filename and dirty dot,
+  // so the next login showed «●» next to a file that is not open.
+  updateEditorState();
   showLogin();
 }
 
@@ -158,7 +198,19 @@ async function enterApp() {
   $('user-login').textContent = S.user.login;
   const av = $('user-avatar');
   if (S.user.avatar_url) { av.src = S.user.avatar_url; av.alt = S.user.login; av.hidden = false; }
-  else av.hidden = true;
+  else { av.removeAttribute('src'); av.hidden = true; }
+
+  document.body.classList.toggle('demo', S.demo);
+  $('demo-banner').hidden = !S.demo;
+
+  // Demo: no repo cache, no rate-limit panel, and we land directly in a document
+  // so the editor is exercised the moment the button is pressed.
+  if (S.demo) {
+    await loadRepos(false);
+    await openRepo(S.repos[0]);
+    await openFile(DEMO_START_FILE);
+    return;
+  }
 
   S.gh.onRateLimit = (remaining, limit, reset) => {
     const box = $('ratelimit');
@@ -179,6 +231,21 @@ async function enterApp() {
 
 async function loadRepos(quiet) {
   $('repo-status').textContent = 'در حال بارگذاری مخزن‌ها…';
+
+  // Never read or write repos_cache in a demo session — it would clobber the
+  // real cache of a user who has a token stored.
+  if (S.demo) {
+    try {
+      S.repos = await S.gh.repos();
+      renderRepoList();
+      $('repo-status').textContent = 'حالت نمایشی — بدون توکن';
+    } catch (err) {
+      $('repo-status').textContent = '';
+      toast(err.message, 'error');
+    }
+    return;
+  }
+
   try {
     let all = [];
     for (let page = 1; page <= 5; page++) {          // cap at 500 repos
@@ -218,6 +285,7 @@ function renderRepoList() {
     if (r.owner !== S.user.login) b.appendChild(el('span', 'repo-owner', r.owner));
     if (r.private) b.appendChild(el('span', 'badge', 'خصوصی'));
     if (r.archived) b.appendChild(el('span', 'badge', 'بایگانی'));
+    if (S.demo) b.appendChild(el('span', 'badge', 'نمایشی'));
     b.addEventListener('click', () => openRepo(r));
     frag.appendChild(b);
   }
@@ -260,8 +328,8 @@ async function loadTree() {
     S.tree = (t.tree || []).filter(e =>
       e.type === 'blob' && e.mode !== '160000' && e.mode !== '120000');
     S.treeTruncated = !!t.truncated;
-    S.expanded = getJSON(`expanded:${S.repo.owner}/${S.repo.name}`, []);
-    S.expanded = new Set(Array.isArray(S.expanded) ? S.expanded : []);
+    const saved = S.demo ? null : getJSON(`expanded:${S.repo.owner}/${S.repo.name}`, null);
+    S.expanded = new Set(Array.isArray(saved) ? saved : []);
     // First visit to a repo whose notes all live in one top-level folder would
     // otherwise show a single collapsed folder and no files at all. Expand a
     // lone root folder automatically.
@@ -332,7 +400,7 @@ function renderNode(node, prefix) {
     btn.appendChild(el('span', 'dir-name', d));
     btn.addEventListener('click', () => {
       if (open) S.expanded.delete(path); else S.expanded.add(path);
-      setJSON(`expanded:${S.repo.owner}/${S.repo.name}`, [...S.expanded]);
+      if (!S.demo) setJSON(`expanded:${S.repo.owner}/${S.repo.name}`, [...S.expanded]);
       renderTree();
     });
     li.appendChild(btn);
@@ -396,10 +464,8 @@ async function openFile(path) {
     updateLineNumbers();
     updatePreview();
     markActiveFile(path);
-    // On small mobile screens, collapse drawer after opening a file
-    if (window.innerWidth <= 860) {
-      document.body.classList.add('sidebar-collapsed');
-    }
+    // On small screens the drawer is an overlay: get out of the way of the file.
+    if (isMobile()) setSidebarOpen(false);
   } catch (err) {
     if (err.status === 401) { logout(); return; }
     toast(err.message, 'error');
@@ -437,9 +503,19 @@ function updateEditorState() {
   ed.classList.toggle('readonly', S.readOnly);
   $('readonly-banner').hidden = !S.readOnly;
   $('readonly-why').textContent = S.readOnlyWhy;
+  $('demo-banner').hidden = !S.demo;
   $('dirty-dot').hidden = !S.dirty;
-  const cBtn = $('commit-btn'); if (cBtn) cBtn.disabled = !S.dirty || S.saving || S.readOnly || !S.path;
-  $('btn-new-file').disabled = !S.repo;
+
+  const cBtn = $('commit-btn');
+  if (cBtn) {
+    // A demo session can edit but never write, so the button stays disabled and
+    // says why instead of opening a commit dialog that must fail.
+    cBtn.disabled = !S.dirty || S.saving || S.readOnly || !S.path || S.demo;
+    cBtn.title = S.demo ? 'حالت نمایشی — برای کامیت با توکن وارد شوید' : 'ثبت تغییرات (Ctrl+S)';
+  }
+  const nBtn = $('btn-new-file');
+  nBtn.disabled = !S.repo || S.demo;
+  nBtn.title = S.demo ? 'حالت نمایشی — فقط خواندن فایل‌های نمونه' : 'فایل جدید';
   const words = ed.value.trim() ? ed.value.trim().split(/\s+/).length : 0;
   $('counts').textContent =
     `${words.toLocaleString('fa-IR')} واژه · ${ed.value.length.toLocaleString('fa-IR')} نویسه`;
@@ -567,6 +643,10 @@ function setMode(mode) {
 
 // ---------------------------------------------------------------------- save
 async function save() {
+  if (S.demo) {                                  // Ctrl+S reaches here too
+    toast('حالت نمایشی است؛ برای ثبت تغییرات با توکن وارد شوید.', 'warn', 'ورود با توکن', logout);
+    return;
+  }
   if (!S.path || S.saving || S.readOnly) return;
   const text = $('editor').value;
   if (!S.dirty && !S.newFile) { toast('تغییری برای ذخیره نیست.', 'info'); return; }
@@ -724,19 +804,6 @@ async function newFile() {
   updatePreview();
   $('editor').focus();
 }
-
-async function saveAs() {
-  if (!S.path) return;
-  const input = prompt('مسیر جدید (مثلاً notes/foo.md):', S.path);
-  if (!input) return;
-  const clean = input.replace(/^\/+/, '').trim();
-  if (!clean) return;
-  S.path = clean; S.newFile = true; S.sha = null;
-  $('path-label').textContent = clean + ' (فایل جدید)';
-  setRenderContext({ dir: dirOf(clean) });
-  toast('مسیر عوض شد. حالا ذخیره کنید.', 'info');
-}
-
 
 // ----------------------------------------------------------- line numbers gutter
 let lastLineCount = 0;
@@ -1160,9 +1227,54 @@ function onEditorEnter(e) {
   onEditorInput();
 }
 
+// --------------------------------------------------------- responsive shell
+// One source of truth for "are we in the mobile shell". It mirrors the 860px
+// media query in css/app.css — keep the two numbers in step.
+const mobileMQ = window.matchMedia?.('(max-width: 860px)') ?? null;
+const isMobile = () => !!mobileMQ?.matches;
+
+const isSidebarOpen = () => !document.body.classList.contains('sidebar-collapsed');
+
+function setSidebarOpen(open) {
+  document.body.classList.toggle('sidebar-collapsed', !open);
+  $('sidebar-toggle').setAttribute('aria-expanded', String(open));
+}
+
+/**
+ * On mobile the secondary header controls move into the ⋯ dialog; on desktop
+ * they live in the header. The real nodes are MOVED (not duplicated), so ids,
+ * listeners and styles keep working and there is only ever one of each.
+ */
+function layoutTopbar(mobile = isMobile()) {
+  const slot = $(mobile ? 'menu-slot' : 'topbar-extra');
+  for (const id of ['find-open', 'btn-new-file', 'user-box']) slot.appendChild($(id));
+  setSidebarOpen(!mobile);          // each shell starts in its natural state
+}
+
+function openMenu() {
+  const d = $('more-dialog');
+  $('more-btn').setAttribute('aria-expanded', 'true');
+  // showModal() gives focus trapping, Escape and the top layer for free; the
+  // fallback keeps the menu reachable in environments without <dialog> support.
+  if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+}
+function closeMenu() {
+  const d = $('more-dialog');
+  if (d.open && typeof d.close === 'function') d.close();
+  $('more-btn').setAttribute('aria-expanded', 'false');
+}
+
+/** --topbar-h drives the mobile drawer's offset, so it must be the real height. */
+function measureTopbar() {
+  const h = $('topbar')?.offsetHeight;
+  if (h) document.documentElement.style.setProperty('--topbar-h', `${h}px`);
+}
+
 // ------------------------------------------------------------------ wiring
 function wire() {
   $('login-form').addEventListener('submit', (e) => { e.preventDefault(); doLogin(); });
+  $('demo-btn').addEventListener('click', startDemo);
+  $('demo-login').addEventListener('click', logout);
   $('logout-btn').addEventListener('click', logout);
   $('refresh-repos').addEventListener('click', () => loadRepos(false));
   $('repo-filter').addEventListener('input', renderRepoList);
@@ -1198,10 +1310,25 @@ function wire() {
   $('mode-split').addEventListener('click', () => setMode('split'));
   $('commit-btn')?.addEventListener('click', save);
   $('btn-new-file').addEventListener('click', newFile);
-  $('sidebar-toggle').addEventListener('click', () =>
-    document.body.classList.toggle('sidebar-collapsed'));
-  $('sidebar-overlay')?.addEventListener('click', () =>
-    document.body.classList.add('sidebar-collapsed'));
+  $('sidebar-toggle').addEventListener('click', () => setSidebarOpen(!isSidebarOpen()));
+  $('sidebar-overlay')?.addEventListener('click', () => setSidebarOpen(false));
+
+  // ⋯ menu. Capture phase, so the menu is already closed when the button's own
+  // handler runs (e.g. خروج hides the whole app view underneath it).
+  $('more-btn').addEventListener('click', openMenu);
+  $('more-close').addEventListener('click', closeMenu);
+  $('more-dialog').addEventListener('click', (e) => {
+    if (e.target === $('more-dialog') || e.target.closest('button')) closeMenu();
+  }, true);
+  $('more-dialog').addEventListener('close', () =>
+    $('more-btn').setAttribute('aria-expanded', 'false'));
+
+  // On touch, tapping a toolbar button blurs the textarea before the click
+  // handler runs, and the selection it formats is gone. Refusing the default on
+  // pointerdown keeps focus (and the selection) in the editor.
+  $('editor-toolbar')?.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('[data-action]')) e.preventDefault();
+  });
 
   // Formatting toolbar listener
   $('editor-toolbar')?.addEventListener('click', (e) => {
@@ -1239,8 +1366,18 @@ function wire() {
   document.addEventListener('keydown', onKeydown);
 
   window.addEventListener('beforeunload', (e) => {
-    if (S.dirty) { e.preventDefault(); e.returnValue = ''; }
+    // A demo session saves nothing, so a "changes may be lost" prompt would be
+    // a lie — and everyone closes a demo tab eventually.
+    if (S.dirty && !S.demo) { e.preventDefault(); e.returnValue = ''; }
   });
+
+  // Responsive shell: rows/menu on mobile, drawer offset tracking the header.
+  layoutTopbar();
+  measureTopbar();
+  if (window.ResizeObserver) new window.ResizeObserver(measureTopbar).observe($('topbar'));
+  else window.addEventListener('resize', measureTopbar);
+  mobileMQ?.addEventListener('change', () => { layoutTopbar(); measureTopbar(); });
+  document.fonts?.ready?.then(measureTopbar);   // the webfont swap changes heights
 
   window.addEventListener('error', (e) => {
     toast('خطای غیرمنتظره: ' + (e.message || 'نامشخص'), 'error');
