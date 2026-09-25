@@ -4,7 +4,10 @@
   "type": "module",
   "description": "Dev dependencies for tests/ only. The app itself needs no install, no build step.",
   "scripts": {
-    "test": "node --test \"tests/*.test.mjs\""
+    "test": "node --test \"tests/*.test.mjs\"",
+    "test:browser": "node tests/editor.browser.mjs && node tests/app.browser.mjs",
+    "build:vendor": "node tools/build-vendor.mjs",
+    "serve": "python3 -m http.server 8080"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.11.1",

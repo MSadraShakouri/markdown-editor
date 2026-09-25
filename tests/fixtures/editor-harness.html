@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>js/editor.mjs harness (test fixture)</title>
+<!-- The real stylesheet and the real module: this fixture exists so
+     tests/editor.browser.mjs can drive js/editor.mjs through its public API
+     without the rest of the app in the way. -->
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  /* the real app.css, so the harness tests the real skin */
+  html, body { height: 100%; margin: 0; }
+  #mount { height: 420px; border: 1px solid var(--border); }
+  #log { font-family: ui-monospace, monospace; font-size: 12px; padding: 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="mount"></div>
+<div id="log">…</div>
+<script type="module">
+import { createEditor } from '/js/editor.mjs';
+
+const DOC = [
+  'این خط فارسی است و باید راست‌چین شود.',
+  'This line is English and must stay left aligned.',
+  'خط سوم با `useState(count)` در میان متن فارسی.',
+  '- [ ] کار انجام‌نشده',
+].join('\n');
+
+const ed = createEditor({
+  parent: document.getElementById('mount'),
+  doc: DOC,
+  wrap: true,
+  placeholder: 'شروع به نوشتن…',
+  onChange: () => { window.__changes = (window.__changes || 0) + 1; },
+  onCursor: () => { window.__cursors = (window.__cursors || 0) + 1; },
+});
+window.ed = ed;
+window.__ready = true;   // the test waits on this
+window.__report = () => {
+  const lines = [...ed.view.contentDOM.querySelectorAll('.cm-line')];
+  return {
+    lines: lines.map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        dir: getComputedStyle(el).direction,
+        top: Math.round(r.top), h: Math.round(r.height),
+        text: el.textContent.slice(0, 24),
+      };
+    }),
+    gutter: [...ed.view.dom.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
+      .filter((e) => /[۰-۹]/.test(e.textContent) && getComputedStyle(e).visibility !== 'hidden')
+      .map((e) => `${e.textContent}@${Math.round(e.getBoundingClientRect().top)}`),
+    gutterWidth: Math.round(ed.view.dom.querySelector('.cm-gutters')?.getBoundingClientRect().width ?? 0),
+    scrollWidth: ed.view.scrollDOM.scrollWidth,
+    clientWidth: ed.view.scrollDOM.clientWidth,
+    wrap: ed.getWrap(),
+    doc: ed.getValue(),
+    matches: ed.view.dom.querySelectorAll('.cm-hl-match').length,
+    currentMatches: ed.view.dom.querySelectorAll('.cm-hl-current').length,
+  };
+};
+</script>
+</body>
+</html>

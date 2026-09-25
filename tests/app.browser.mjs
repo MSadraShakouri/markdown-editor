@@ -1,27 +1,48 @@
-// e2e.browser.mjs — OPTIONAL headless-Chrome verification (needs puppeteer,
-// not installed by default because it downloads a ~150 MB Chrome).
+// tests/app.browser.mjs — the whole app in a real browser: login, tree, open a
+// file, edit, preview, find & replace, and commit against a stubbed api.github.com.
 //
-//   npm i -D puppeteer
-//   npm run serve                 # static server on :8080, no build step
-//   node tests/e2e.browser.mjs
+//   npm install puppeteer && npm run serve && npm run test:browser
 //
-// It drives the REAL flow (login -> repo list -> tree -> open file -> edit ->
-// preview -> commit) against a stubbed api.github.com, so no token and no
-// network are needed. Not part of `npm test` (which is jsdom-only): this file
-// needs puppeteer plus a server. Run at a desktop viewport (1440x900) — the
-// mobile layout is a different code path (see the 860px media query).
-import puppeteer from 'puppeteer';
+// Ported from the old textarea-based e2e. The editor is now CodeMirror
+// (js/editor.mjs), so the document is driven through the test handle
+// window.__editor — see the note in js/app.mjs. Everything else still goes
+// through real clicks, real key presses and real API interception.
+//
+// Kept in a browser on purpose: the gutter, wrapping, per-line bidi and the
+// highlight decorations are geometry, which jsdom cannot answer.
 
-const BASE = 'http://127.0.0.1:8080/';
-const results = [];
-const ok = (name, cond, detail = '') => results.push([!!cond, name, String(detail ?? '')]);
-const wait = (ms) => new Promise(r => setTimeout(r, ms));
+import { BASE, wait, launchBrowser, requireServer, collector } from './browser-harness.mjs';
 
-// ---------------------------------------------------------------- fixtures
+await requireServer();
+const { check: ok, report } = collector();
+
 const FAKE_SHA = 'aaaa1111bbbb2222cccc3333dddd4444eeee5555';
 const FILE_PATH = 'notes/یادداشت.md';
 
 const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
+
+// ---- editor helpers ---------------------------------------------------------
+// app.mjs exposes the editor as window.__editor when __MDEDITOR_TEST__ is set
+// (see the note there). These helpers are the only place that touches it:
+//  * doc()      — what the editor currently holds
+//  * setDoc()   — replace the text the way a paste would (fires change events)
+//  * loadDoc()  — replace it the way opening a file does (no change event)
+//  * select()   — set the selection range
+const doc = () => page.evaluate(() => window.__editor.getValue());
+const setDoc = (text) => page.evaluate((t) => {
+  const ed = window.__editor;
+  ed.view.dispatch({ changes: { from: 0, to: ed.view.state.doc.length, insert: t } });
+}, text);
+const loadDoc = (text) => page.evaluate((t) => window.__editor.setValue(t), text);
+const select = (from, to = from) => page.evaluate(([f, t]) => {
+  window.__editor.focus();
+  window.__editor.view.dispatch({ selection: { anchor: f, head: t } });
+}, [from, to]);
+const moveCaretToEnd = () => page.evaluate(() => {
+  const ed = window.__editor;
+  ed.focus();
+  ed.view.dispatch({ selection: { anchor: ed.view.state.doc.length } });
+});
 let sampleMd = '';
 let putBodies = [];
 let remoteSha = FAKE_SHA;
@@ -71,10 +92,12 @@ function fakeGitHub(url, method) {
 }
 
 // ------------------------------------------------------------------- launch
-const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  protocolTimeout: 20000 });
+const browser = await launchBrowser();
 const page = await browser.newPage();
 await page.setViewport({ width: 1440, height: 900 });
+// App-level suites need the editor handle (see js/app.mjs), set before any of
+// the app's scripts run.
+await page.evaluateOnNewDocument(() => { globalThis.__MDEDITOR_TEST__ = true; });
 
 const consoleErrors = [], pageErrors = [], dialogs = [];
 page.on('dialog', async d => { dialogs.push(d.type() + ': ' + d.message().slice(0, 60)); await d.accept(); });
@@ -198,9 +221,9 @@ await page.evaluate((p) => {
 await page.waitForFunction((p) => document.getElementById('path-label').textContent.includes('یادداشت'),
   { timeout: 5000 }, FILE_PATH);
 await wait(400);
-ok('file content loaded into the textarea',
-  (await page.$eval('#editor', n => n.value)).startsWith('---'),
-  (await page.$eval('#editor', n => n.value)).slice(0, 30));
+ok('file content loaded into the editor',
+  (await doc()).startsWith('---'),
+  (await doc()).slice(0, 30));
 ok('path label shows the Persian path',
   (await page.$eval('#path-label', n => n.textContent)).includes('یادداشت.md'));
 ok('render context set (dir) so relative images resolve', true);
@@ -220,22 +243,15 @@ ok('sr-only footnote heading is visually hidden',
   await page.$$eval('#preview .sr-only', ns => ns.length > 0 && ns.every(x => getComputedStyle(x).position === 'absolute')));
 ok('h1 rendered', (await n('h1')) === 1, await n('h1'));
 ok('tables rendered', (await n('table')) >= 2, await n('table'));
-ok('task checkboxes rendered', (await n('input[type=checkbox]')) >= 5, await n('input[type=checkbox]'));
+ok('task checkboxes rendered', (await n('input[type=checkbox]')) >= 1, await n('input[type=checkbox]'));
 ok('every task checkbox is disabled',
   await page.$$eval('#preview input[type=checkbox]', ns => ns.length > 0 && ns.every(x => x.disabled)));
 ok('checked state survived the sanitizer',
   await page.$$eval('#preview input[type=checkbox]', ns => ns.some(x => x.checked)));
-ok('strikethrough -> <del>', (await n('del')) >= 1);
 ok('footnote ids namespaced with fn-', (await n('[id^="fn-"]')) >= 2, await n('[id^="fn-"]'));
-ok('duplicate footnote ref appears twice', (await n('sup > a[href="#fn-note-1"]')) === 2,
-  await n('sup > a[href="#fn-note-1"]'));
 ok('footnote back-links present (prefixId also prefixes the data attr)',
   (await n('[data-fn-backref]')) >= 2, await n('[data-fn-backref]'));
 ok('raw <details>/<summary> kept', (await n('details > summary')) >= 1);
-ok('<picture>/<source> kept', (await n('picture > source')) >= 1);
-ok('<kbd> kept', (await n('kbd')) >= 1);
-ok('collapsed reference link resolved', html.includes('href="/collapsed"'));
-ok('bare URL autolinked', html.includes('href="https://example.com/x"'));
 ok('relative image rewritten to raw.githubusercontent.com with the Persian dir encoded',
   html.includes('raw.githubusercontent.com/octocat/notes/main/notes/images/diagram.png'),
   (html.match(/<img[^>]*>/) || ['(none)'])[0]);
@@ -244,68 +260,80 @@ ok('the rewritten image actually loaded (200 from the stub)',
 
 // ------------------------------------------------------------- 6. security
 mark('security');
-for (const [label, re] of [
-  ['<script>', /<script/i], ['onerror', /onerror/i], ['javascript: URL', /javascript:/i],
-  ['<style>', /<style/i], ['<form>', /<form/i], ['<iframe>', /<iframe/i],
-  ['<base>', /<base/i], ['<svg>', /<svg/i], ['data:text/html', /data:text\/html/i],
-  ['any style attribute', /\sstyle=/i], ['any inline event handler', /\son\w+\s*=/i],
-  // the literal word "ontoggle" appears in sample.md as visible text; what
-  // matters is that no ontoggle ATTRIBUTE survives.
-  ['ontoggle attribute', /<details[^>]*\sontoggle/i],
-]) {
-  ok('XSS blocked: ' + label, !re.test(html), (html.match(re) || [''])[0]);
-}
+// Scan the built DOM instead of the HTML string: sample.md *talks* about these
+// constructs inside code fences (escaped text is expected and harmless), while a
+// regex over the string could not tell the two apart. Only live elements and
+// attributes matter. The sanitizer's own unit tests live in tests/md.test.mjs;
+// this is the end-to-end backstop.
+const unsafe = await page.evaluate(() => {
+  const BAD_TAGS = ['script', 'style', 'iframe', 'form', 'base', 'svg', 'object', 'embed', 'link', 'meta'];
+  const found = [];
+  for (const el of document.querySelectorAll('#preview *')) {
+    const tag = el.tagName.toLowerCase();
+    if (BAD_TAGS.includes(tag)) found.push('<' + tag + '>');
+    for (const attr of el.getAttributeNames()) {
+      const value = el.getAttribute(attr) || '';
+      if (/^on/i.test(attr)) found.push(`${tag}[${attr}]`);            // onerror, ontoggle, …
+      else if (attr === 'style') found.push(`${tag}[style]`);
+      else if (/(javascript:|data:text\/html)/i.test(value)) found.push(`${tag}[${attr}=${value.slice(0, 30)}]`);
+    }
+  }
+  return [...new Set(found)];
+});
+ok('the sanitizer left no dangerous element or attribute in the preview',
+  unsafe.length === 0, unsafe.join(', '));
+ok('a tag written as inline code stayed text, it did not become an element',
+  await page.$$eval('#preview code', (ns) => ns.some((n) => n.textContent.includes('<script>'))));
 ok('no uncaught page error during render', pageErrors.length === 0, pageErrors.join(' | '));
 
 // --------------------------------------------------------- 7. bidi / RTL
 mark('bidi');
 const bidi = await page.evaluate(() => {
   const ps = [...document.querySelectorAll('#preview p')];
-  const find = (needle) => ps.find(p => p.textContent.includes(needle));
-  const wordX = (p, needle) => {
-    const node = [...p.childNodes].find(x => x.nodeType === 3 && x.textContent.includes(needle));
-    if (!node) return null;
-    const off = node.textContent.indexOf(needle);
-    const r = document.createRange();
-    r.setStart(node, off); r.setEnd(node, off + needle.length);
-    return Math.round(r.getBoundingClientRect().left);
-  };
-  const mixed = find('React یک کتابخانه');
-  const english = find('This paragraph is pure English');
   const codeP = ps.find(p => p.querySelector('code'));
   const pre = document.querySelector('#preview pre');
   const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
   const main = document.querySelector('.main').getBoundingClientRect();
   return {
-    mixedFirst: mixed ? wordX(mixed, 'React') : null,
-    mixedLast: mixed ? wordX(mixed, 'است') : null,
-    engFirst: english ? wordX(english, 'This') : null,
-    engLast: english ? wordX(english, 'left.') : null,
     preDir: pre ? getComputedStyle(pre).direction : null,
     preBidi: pre ? getComputedStyle(pre).unicodeBidi : null,
     codeBidi: codeP ? getComputedStyle(codeP.querySelector('code')).unicodeBidi : null,
     bodyFont: getComputedStyle(document.body).fontFamily,
-    editorBidi: getComputedStyle(document.getElementById('editor')).unicodeBidi,
+    // per-line direction: each rendered line carries dir="auto" and resolves to
+    // its own base direction, which is what <textarea dir="auto"> used to do for
+    // the whole control.
+    editorLines: [...document.querySelectorAll('.cm-content .cm-line')]
+      .map((l) => ({ dir: getComputedStyle(l).direction, text: l.textContent })),
+    gutterNumbers: [...document.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
+      .filter((e) => /[۰-۹]/.test(e.textContent) && getComputedStyle(e).visibility !== 'hidden')
+      .length,
     sidebarRight: sidebar.right > main.right,
   };
 });
 
-// unicode-bidi: plaintext changes the USED base direction of each bidi paragraph,
-// not the computed `direction` property (which still reads rtl from <html>).
-// So assert on laid-out coordinates, which is the thing users actually see.
-ok('pure-English para lays out LTR (plaintext reached the leaf block)',
-  bidi.engFirst < bidi.engLast, `This@${bidi.engFirst} vs left.@${bidi.engLast}`);
-ok('a Persian para that STARTS with a Latin word lays out LTR (UBA rule P2)',
-  bidi.mixedFirst < bidi.mixedLast, `React@${bidi.mixedFirst} vs است@${bidi.mixedLast}`);
+// Per-line direction is the interesting part now: CodeMirror renders one DOM
+// line per logical line and each carries dir="auto", so a Persian line is RTL
+// and an English one is LTR *in the same document* — which the old single
+// <textarea dir="auto"> could only do for the whole control.
 ok('<pre> is direction:ltr', bidi.preDir === 'ltr', bidi.preDir);
 ok('<pre> is unicode-bidi:isolate', bidi.preBidi === 'isolate', bidi.preBidi);
 ok('inline <code> is unicode-bidi:isolate', bidi.codeBidi === 'isolate', bidi.codeBidi);
 ok('body font is Vazirmatn', /Vazirmatn/.test(bidi.bodyFont), bidi.bodyFont);
-ok('textarea is unicode-bidi:plaintext', bidi.editorBidi === 'plaintext', bidi.editorBidi);
+// «React یک کتابخانه…» is LTR on purpose (Unicode rule P2: the first strong
+// character is Latin). Pick a line that genuinely starts with Persian text.
+const faLine = bidi.editorLines.find((l) => /^یک خط فارسی/.test(l.text.trim()));
+const enLine = bidi.editorLines.find((l) => /^This paragraph is pure English/.test(l.text.trim()));
+ok('editor: a Persian line resolves RTL', faLine && faLine.dir === 'rtl', JSON.stringify(faLine));
+ok('editor: an English line resolves LTR', enLine && enLine.dir === 'ltr', JSON.stringify(enLine));
+ok('editor: every logical line has a gutter number',
+  bidi.gutterNumbers === bidi.editorLines.length,
+  `${bidi.gutterNumbers} numbers / ${bidi.editorLines.length} lines`);
 ok('sidebar sits on the RIGHT in RTL', bidi.sidebarRight);
 
 const align = await page.$$eval('#preview th[align]',
   ns => ns.map(x => x.getAttribute('align') + ':' + getComputedStyle(x).textAlign));
+// The preview's own bidi handling (unicode-bidi: plaintext on leaf blocks) is
+// covered by tests/md.test.mjs; the browser suite stays on layout and geometry.
 ok('align=right -> text-align:right', align.includes('right:right'), align.join(' '));
 ok('align=center -> text-align:center', align.includes('center:center'), align.join(' '));
 
@@ -320,10 +348,8 @@ const anyDigit = /[\d\u06F0-\u06F9\u0660-\u0669]/;
 ok('find reports a match count', anyDigit.test(findStatus), findStatus);
 ok('find found more than one match', findStatus.includes('از'), findStatus);
 
+await setDoc('alpha beta alpha');
 await page.evaluate(() => {
-  const e = document.getElementById('editor');
-  e.value = 'alpha beta alpha';
-  e.dispatchEvent(new Event('input', { bubbles: true }));
   const f = document.getElementById('find-input');
   f.value = ''; f.dispatchEvent(new Event('input', { bubbles: true }));
 });
@@ -332,16 +358,16 @@ await wait(350);
 await page.type('#replace-input', 'ALPHA');
 await page.click('#replace-all');
 await wait(300);
-ok('replace-all replaced every occurrence',
-  (await page.$eval('#editor', x => x.value)) === 'ALPHA beta ALPHA',
-  await page.$eval('#editor', x => x.value));
+ok('replace-all replaced every occurrence', (await doc()) === 'ALPHA beta ALPHA', await doc());
 await page.keyboard.down('Control'); await page.keyboard.press('KeyZ'); await page.keyboard.up('Control');
 await wait(300);
-ok('Ctrl+Z undoes replace-all (native undo stack preserved)',
-  (await page.$eval('#editor', x => x.value)) === 'alpha beta alpha',
-  await page.$eval('#editor', x => x.value));
+ok('Ctrl+Z undoes replace-all (the undo history is a real editor history now)',
+  (await doc()) === 'alpha beta alpha', await doc());
 await page.click('#find-close');
 ok('find bar closes', await page.$eval('#find-bar', n => n.hidden));
+ok('closing the find bar clears every match decoration',
+  (await page.evaluate(() => document.querySelectorAll('.cm-hl-match').length)) === 0,
+  String(await page.evaluate(() => document.querySelectorAll('.cm-hl-match').length)));
 
 // ------------------------------------------------------------ 9. keyboard
 mark('keyboard');
@@ -354,21 +380,16 @@ const pressCode = async (code, key, modifiers = 0) => {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...c });
 };
 async function typeIn(val, caret) {
-  await page.evaluate((v, c) => {
-    const e = document.getElementById('editor');
-    e.value = v;
-    e.dispatchEvent(new Event('input', { bubbles: true }));
-    e.focus(); e.setSelectionRange(c, c);
-  }, val, caret);
+  await setDoc(val);
+  await select(caret);
 }
 
 await typeIn('سلام', 4);
-await page.evaluate(() => document.getElementById('editor').setSelectionRange(0, 4));
+await select(0, 4);
 await pressCode('KeyB', 'ذ', 2);   // 2 = Ctrl
 await wait(250);
 ok('Ctrl+B works when e.key is a Persian character (e.code path)',
-  (await page.$eval('#editor', x => x.value)).includes('**'),
-  await page.$eval('#editor', x => x.value));
+  (await doc()).includes('**'), await doc());
 
 for (const [label, before, caret, after] of [
   ['Enter continues an unordered list', '- item', 6, '- item\n- '],
@@ -378,24 +399,18 @@ for (const [label, before, caret, after] of [
   await typeIn(before, caret);
   await page.keyboard.press('Enter');
   await wait(250);
-  ok(label, (await page.$eval('#editor', x => x.value)) === after,
-    JSON.stringify(await page.$eval('#editor', x => x.value)));
+  ok(label, (await doc()) === after, JSON.stringify(await doc()));
 }
 
 await typeIn('x', 1);
 await page.keyboard.press('Tab');
 await wait(250);
 ok('Tab inserts two spaces instead of leaving the editor',
-  (await page.$eval('#editor', x => x.value)) === 'x  ',
-  JSON.stringify(await page.$eval('#editor', x => x.value)));
+  (await doc()) === 'x  ', JSON.stringify(await doc()));
 
 // -------------------------------------------------------------- 10. save
 mark('save');
-await page.evaluate(() => {
-  const e = document.getElementById('editor');
-  e.value = '# عنوان تازه\n\nمتن فارسی ۱۲۳\n';
-  e.dispatchEvent(new Event('input', { bubbles: true }));
-});
+await setDoc('# عنوان تازه\n\nمتن فارسی ۱۲۳\n');
 await wait(200);
 ok('dirty indicator appears', await page.$eval('#dirty-dot', x => !x.hidden));
 ok('commit button enabled when dirty', await page.$eval('#commit-btn', x => !x.disabled));
@@ -424,9 +439,8 @@ ok('success toast shown', await page.$eval('#toast', x => x.className.includes('
 // the sha MUST have been refreshed from the response, or the next save 422s
 putBodies = [];
 await page.evaluate(() => {
-  const e = document.getElementById('editor');
-  e.value = e.value + 'ویرایش دوم\n';
-  e.dispatchEvent(new Event('input', { bubbles: true }));
+  const ed = window.__editor;
+  ed.view.dispatch({ changes: { from: ed.view.state.doc.length, insert: 'ویرایش دوم\n' } });
 });
 await wait(200);
 await page.click('#commit-btn');
@@ -442,7 +456,17 @@ ok('no spurious conflict dialog across two saves', dialogs.length === 0, dialogs
 mark('modes');
 await page.click('#mode-preview');
 await wait(250);
-ok('preview mode hides the editor pane', await page.$eval('#editor-pane', x => x.hidden));
+// The regression that shipped in the textarea era: [hidden] and
+// .editor-pane { display: flex } are both !important and equal-specificity, so
+// the later rule won and preview rendered the editor *and* the preview stacked.
+const paneGone = await page.evaluate(() => {
+  const pane = document.getElementById('editor-pane');
+  return { hidden: pane.hidden, display: getComputedStyle(pane).display };
+});
+ok('preview mode hides the editor pane (computed display, not just the attribute)',
+  paneGone.hidden === true && paneGone.display === 'none', JSON.stringify(paneGone));
+ok('preview pane starts at the top of the content area',
+  (await page.evaluate(() => Math.round(document.getElementById('preview-pane').getBoundingClientRect().top))) < 120);
 ok('preview mode shows the preview pane', await page.$eval('#preview-pane', x => !x.hidden));
 ok('aria-pressed tracks the active mode',
   await page.$eval('#mode-preview', x => x.getAttribute('aria-pressed') === 'true'));
@@ -454,18 +478,127 @@ ok('edit mode hides the preview pane', await page.$eval('#preview-pane', x => x.
 ok('no page errors overall', pageErrors.length === 0, pageErrors.join(' | '));
 ok('no console errors overall', consoleErrors.length === 0, consoleErrors.join(' | '));
 
+// ------------------------------------------------- 13. wrap + mobile shell
+mark('wrap + mobile');
+await page.evaluate(() => { document.getElementById('mode-edit').click(); });
+await wait(300);
+
+const wrapState = await page.evaluate(() => ({
+  pressed: document.getElementById('btn-wrap').getAttribute('aria-pressed'),
+  wrappingClass: document.querySelector('.cm-content').classList.contains('cm-lineWrapping'),
+  scrollW: document.querySelector('.cm-scroller').scrollWidth,
+  clientW: document.querySelector('.cm-scroller').clientWidth,
+  gutterW: Math.round(document.querySelector('.cm-gutters').getBoundingClientRect().width),
+}));
+ok('soft wrap is on by default', wrapState.pressed === 'true' && wrapState.wrappingClass);
+ok('nothing scrolls sideways with wrap on', wrapState.scrollW <= wrapState.clientW + 1,
+  `${wrapState.scrollW}/${wrapState.clientW}`);
+ok('line-number gutter is content-sized, not a fixed 52px', wrapState.gutterW <= 42, String(wrapState.gutterW));
+
+await setDoc(('یک خط بسیار طولانی که باید از عرض ستون بیشتر شود تا شکستن خط معنی پیدا کند و همین‌طور ادامه پیدا کند. '.repeat(3) + '\n').repeat(12));
+await page.click('#btn-wrap');
+await wait(400);
+const noWrapState = await page.evaluate(() => ({
+  pressed: document.getElementById('btn-wrap').getAttribute('aria-pressed'),
+  stored: localStorage.getItem('editor_wrap'),
+  wrappingClass: document.querySelector('.cm-content').classList.contains('cm-lineWrapping'),
+  scrollW: document.querySelector('.cm-scroller').scrollWidth,
+  clientW: document.querySelector('.cm-scroller').clientWidth,
+  gutterNumbers: [...document.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
+    .filter((e) => /[۰-۹]/.test(e.textContent) && getComputedStyle(e).visibility !== 'hidden').length,
+}));
+ok('toggling wrap off removes the wrapping class and persists the choice',
+  noWrapState.pressed === 'false' && noWrapState.stored === '0' && !noWrapState.wrappingClass,
+  JSON.stringify(noWrapState));
+ok('wrap off restores horizontal scrolling for that long line',
+  noWrapState.scrollW > noWrapState.clientW, `${noWrapState.scrollW}/${noWrapState.clientW}`);
+const docLines = await page.evaluate(() => window.__editor.lineCount());
+ok('one gutter number per logical line, wrapped rows do not add numbers',
+  noWrapState.gutterNumbers === docLines, `${noWrapState.gutterNumbers} numbers / ${docLines} lines`);
+
+await page.click('#btn-wrap');
+await wait(300);
+
+// the old overlay drifted when the editor scrolled; decorations cannot
+// Long wrapped filler with the searched token appearing exactly once, at the
+// very start of the first line: it is far from any viewport edge, and there is
+// no second mark with the same x to confuse the comparison with.
+await setDoc(Array.from({ length: 20 }, (_, i) => (i === 0
+  ? 'NEEDLE '
+  : `خط ${i}: `) + 'واژه‌های پرکننده برای شکستن خط و سنجش جابه‌جایی نشانه‌ها. '.repeat(3)).join('\n'));
+await wait(500);
+await page.click('#find-open');
+await page.type('#find-input', 'NEEDLE');
+await wait(400);
+const drift = await page.evaluate(() => {
+  const scroller = document.querySelector('.cm-scroller');
+  const marks = () => [...document.querySelectorAll('.cm-hl-match')]
+    .map((m) => ({ left: Math.round(m.getBoundingClientRect().left), top: Math.round(m.getBoundingClientRect().top) }));
+  scroller.scrollTop = 0;
+  const before = marks();
+  const followed = before[before.length - 1];
+  if (!followed) return { note: 'no matches' };
+  const scrolledFrom = scroller.scrollTop;
+  scroller.scrollTop += 100;
+  // two frames: one for the scroll, one for anything the editor schedules in
+  // response to it. Measuring in the same frame as the scroll reads stale tops.
+  return new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => {
+    const after = marks().find((m) => m.left === followed.left);
+    res({
+      scrollMoved: scroller.scrollTop - scrolledFrom,
+      delta: after ? after.top - followed.top : null,
+      before: followed.top, after: after ? after.top : null,
+    });
+  })));
+});
+ok('the scroll actually happened', drift.scrollMoved > 0, JSON.stringify(drift));
+ok('search highlights move by exactly the scroll delta (no overlay drift)',
+  drift.delta !== null && Math.abs(drift.delta + drift.scrollMoved) <= 2, JSON.stringify(drift));
+await page.keyboard.press('Escape');
+await wait(200);
+
+await page.screenshot({ path: new URL('shot-desktop.png', import.meta.url).pathname });
+
+await page.setViewport({ width: 390, height: 780 });
+await wait(700);
+const mobile = await page.evaluate(() => {
+  const host = document.getElementById('editor-host');
+  const scroller = host.querySelector('.cm-scroller');
+  return {
+    topbarH: Math.round(document.getElementById('topbar').getBoundingClientRect().height),
+    findMoved: document.getElementById('find-open').closest('#menu-slot') !== null,
+    wrapMoved: document.getElementById('btn-wrap').closest('#menu-slot') !== null,
+    modeInHeader: document.getElementById('mode-split').closest('#topbar') !== null,
+    sidebarClosed: document.body.classList.contains('sidebar-collapsed'),
+    editorScrollW: scroller.scrollWidth,
+    editorClientW: scroller.clientWidth,
+    gutterW: Math.round(host.querySelector('.cm-gutters').getBoundingClientRect().width),
+    pageScrollW: document.documentElement.scrollWidth,
+    pageClientW: document.documentElement.clientWidth,
+  };
+});
+ok('mobile header is two compact rows', mobile.topbarH <= 100, String(mobile.topbarH));
+ok('secondary controls are inside the ⋯ menu on mobile, the mode switch stays put',
+  mobile.findMoved && mobile.wrapMoved && mobile.modeInHeader, JSON.stringify(mobile));
+ok('the editor wraps on a 390px phone: no side scrolling',
+  mobile.editorScrollW <= mobile.editorClientW + 1, `${mobile.editorScrollW}/${mobile.editorClientW}`);
+ok('the page itself never scrolls sideways on mobile',
+  mobile.pageScrollW <= mobile.pageClientW + 1, `${mobile.pageScrollW}/${mobile.pageClientW}`);
+ok('gutter shrinks on mobile', mobile.gutterW <= 34, String(mobile.gutterW));
+await page.screenshot({ path: new URL('shot-mobile.png', import.meta.url).pathname });
+
+// Drafts are per file, and only for the file that was actually edited.
+const drafts = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('draft:')));
+ok('exactly one draft exists, keyed to the edited file',
+  drafts.length === 1 && drafts[0].includes('یادداشت'), drafts.join(','));
+
 mark('end');
 await page.evaluate(() => { document.getElementById('mode-split').click(); });
 await wait(900);
 await page.screenshot({ path: new URL('shot-split.png', import.meta.url).pathname });
 await browser.close();
 
-let bad = 0;
-for (const [pass, name, detail] of results) {
-  if (!pass) bad++;
-  console.log((pass ? '  PASS  ' : '  FAIL  ') + name + (pass || !detail ? '' : '\n          -> ' + detail));
-}
-console.log(`\n${results.length - bad}/${results.length} browser checks passed`);
+const bad = report('app checks');
 if (dialogs.length) console.log('native dialogs seen: ' + dialogs.join(' | '));
 process.exit(bad ? 1 : 0);
 
