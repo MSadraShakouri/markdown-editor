@@ -19,7 +19,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230969da'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'%3E%E2%80%8F%E2%9C%8E%3C/text%3E%3C/svg%3E">
 
 <link rel="preload" href="fonts/Vazirmatn[wght].woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/app.css?v=3">
+<link rel="stylesheet" href="css/app.css?v=4">
 </head>
 <body>
 
@@ -101,10 +101,13 @@
       </div>
 
       <div id="topbar-extra" class="topbar-extra">
-        <button id="find-open" type="button" title="جست‌وجو (Ctrl+F)">جست‌وجو</button>
+        <button id="find-open" type="button" title="جست‌وجو (Ctrl+F)"
+                aria-expanded="false" aria-controls="find-bar">جست‌وجو</button>
         <button id="btn-new-file" type="button" title="فایل جدید">فایل جدید</button>
         <button id="btn-wrap" type="button" class="btn-toggle" aria-pressed="true"
                 title="شکستن خطوط (Alt+Z)">شکستن خط</button>
+        <button id="settings-btn" type="button" class="icon-btn" aria-haspopup="dialog"
+                title="تنظیمات" aria-label="تنظیمات">⚙</button>
 
         <span id="user-box" class="user">
           <img id="user-avatar" alt="" width="22" height="22">
@@ -169,7 +172,10 @@
 
     <div class="panes">
       <div id="editor-pane" class="pane editor-pane">
-        <div id="editor-toolbar" class="editor-toolbar" role="toolbar" aria-label="قالب‌بندی متن">
+        <!-- Off by default (js/prefs.mjs). The dialog below turns it on; every
+             button here also has a keyboard path, so nothing is unreachable
+             while it is hidden. -->
+        <div id="editor-toolbar" class="editor-toolbar" role="toolbar" aria-label="قالب‌بندی متن" hidden>
           <button type="button" class="tb-btn" data-action="h1" title="سرفصل ۱ (H1)">H1</button>
           <button type="button" class="tb-btn" data-action="h2" title="سرفصل ۲ (H2)">H2</button>
           <button type="button" class="tb-btn" data-action="h3" title="سرفصل ۳ (H3)">H3</button>
@@ -253,6 +259,29 @@
   </form>
 </dialog>
 
+<dialog id="settings-dialog" class="dlg settings-dlg" aria-labelledby="settings-title">
+  <div class="dlg-header settings-head">
+    <h2 id="settings-title">تنظیمات</h2>
+    <button id="settings-close" type="button" class="icon-btn" aria-label="بستن">✕</button>
+  </div>
+
+  <div class="settings-body">
+    <label class="check">
+      <input id="set-toolbar" type="checkbox">
+      <span>نوار قالب‌بندی بالای ویرایشگر (H1، نقل‌قول، فهرست کارها…)</span>
+    </label>
+    <p class="hint small">
+      به‌طور پیش‌فرض خاموش است تا متن جا بیشتری داشته باشد. همهٔ کارهای آن نوار
+      میان‌بر هم دارند: <b>Ctrl+B</b> تیره، <b>Ctrl+I</b> کج، <b>Ctrl+K</b> پیوند،
+      و <b>Enter</b> در فهرست‌ها خودش ادامه می‌دهد.
+    </p>
+    <p class="hint small">
+      تنظیم‌ها فقط در همین مرورگر ذخیره می‌شوند؛ هیچ‌چیز به‌جز آن به گیت‌هاب
+      فرستاده نمی‌شود.
+    </p>
+  </div>
+</dialog>
+
 <!-- Mobile overflow menu. The extra controls are MOVED into #menu-slot at
      runtime instead of being duplicated (see layoutTopbar() in js/app.mjs). -->
 <dialog id="more-dialog" class="dlg menu-dlg" aria-label="گزینه‌های بیشتر">
@@ -269,7 +298,7 @@
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/marked-footnote.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
-<script type="module" src="js/app.mjs?v=3"></script>
+<script type="module" src="js/app.mjs?v=4"></script>
 
 </body>
 </html>

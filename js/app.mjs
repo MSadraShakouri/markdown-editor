@@ -9,6 +9,7 @@ import {
 import { renderMarkdown, setRenderContext, splitFrontMatter } from './md.mjs';
 import { DemoGitHub, DEMO_START_FILE } from './demo.mjs';
 import { createEditor } from './editor.mjs';
+import { readPref, writePref } from './prefs.mjs';
 
 // --------------------------------------------------------------------- state
 const S = {
@@ -38,7 +39,6 @@ const S = {
 // The editor surface (js/editor.mjs). Created in wire(); everything below talks
 // to it instead of to a <textarea>.
 let ed = null;
-const WRAP_KEY = 'editor_wrap';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -915,18 +915,32 @@ function applyFormatting(action) {
 // CodeMirror (no horizontal scrolling, wrap-aware line numbers, highlights that
 // cannot drift). The toggle is for people who want no-wrap — tables and code
 // blocks line up better that way.
-function readWrapPref() {
-  try {
-    const saved = localStorage.getItem(WRAP_KEY);
-    return saved === null ? true : saved === '1';
-  } catch { return true; }
-}
-
 function setWrap(on) {
   ed.setWrap(on);
-  try { localStorage.setItem(WRAP_KEY, on ? '1' : '0'); } catch {}
+  writePref('wrap', on);
   updateWrapButton();
   if (S.mode === 'split') syncPreviewToEditorCursor();
+}
+
+// ------------------------------------------------------------- app settings
+// One dialog, one place where a preference is turned into a visible change. The
+// defaults live in js/prefs.mjs; the dialog only reflects them.
+function applyToolbarPref() {
+  $('editor-toolbar').hidden = !readPref('toolbar');
+  const box = $('set-toolbar');
+  if (box) box.checked = readPref('toolbar');
+}
+
+function openSettings() {
+  applyToolbarPref();                    // never open the dialog on a stale value
+  const d = $('settings-dialog');
+  if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+}
+
+function closeSettings() {
+  const d = $('settings-dialog');
+  if (d.open && typeof d.close === 'function') d.close();
+  else d.removeAttribute('open');
 }
 
 function updateWrapButton() {
@@ -957,7 +971,9 @@ function setSidebarOpen(open) {
  */
 function layoutTopbar(mobile = isMobile()) {
   const slot = $(mobile ? 'menu-slot' : 'topbar-extra');
-  for (const id of ['find-open', 'btn-new-file', 'btn-wrap', 'user-box']) slot.appendChild($(id));
+  for (const id of ['find-open', 'btn-new-file', 'btn-wrap', 'settings-btn', 'user-box']) {
+    slot.appendChild($(id));
+  }
   setSidebarOpen(!mobile);          // each shell starts in its natural state
 }
 
@@ -1005,12 +1021,13 @@ function wire() {
   // ---- the editor itself -------------------------------------------------
   ed = createEditor({
     parent: $('editor-host'),
-    wrap: readWrapPref(),
+    wrap: readPref('wrap'),
     placeholder: 'فایلی از نوار کناری انتخاب کنید…',
     onChange: onEditorInput,
     onCursor: () => { if (S.mode === 'split') syncPreviewToEditorCursor(); },
   });
   updateWrapButton();
+  applyToolbarPref();          // the toolbar's default is off (js/prefs.mjs)
 
   // Test/debug handle for the browser suites (tests/*.browser.mjs): they need to
   // read and replace the document without typing thousands of characters. It is
@@ -1030,6 +1047,17 @@ function wire() {
 
   // ⋯ menu. Capture phase, so the menu is already closed when the button's own
   // handler runs (e.g. خروج hides the whole app view underneath it).
+  $('settings-btn').addEventListener('click', openSettings);
+  $('settings-close').addEventListener('click', closeSettings);
+  $('settings-dialog').addEventListener('click', (e) => {
+    // click on the backdrop (the dialog element itself) closes it
+    if (e.target === $('settings-dialog')) closeSettings();
+  });
+  $('set-toolbar').addEventListener('change', (e) => {
+    writePref('toolbar', e.target.checked);
+    applyToolbarPref();
+  });
+
   $('more-btn').addEventListener('click', openMenu);
   $('more-close').addEventListener('click', closeMenu);
   $('more-dialog').addEventListener('click', (e) => {
