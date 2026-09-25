@@ -19,7 +19,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230969da'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'%3E%E2%80%8F%E2%9C%8E%3C/text%3E%3C/svg%3E">
 
 <link rel="preload" href="fonts/Vazirmatn[wght].woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/app.css?v=1">
+<link rel="stylesheet" href="css/app.css?v=5">
 </head>
 <body>
 
@@ -44,6 +44,17 @@
     </label>
 
     <button id="login-btn" type="submit">ورود</button>
+
+    <div class="login-divider"><span>یا</span></div>
+
+    <!-- type="button": inside the form a submit button would run the token
+         input's `required` validation and never reach the handler. -->
+    <button id="demo-btn" type="button" class="ghost-btn">نسخهٔ نمایشی — بدون توکن</button>
+    <p class="hint small">
+      در حالت نمایشی یک مخزن نمونه با چند فایل باز می‌شود: می‌توانید بنویسید،
+      قالب‌بندی کنید و پیش‌نمایش بگیرید، اما هیچ‌چیز روی گیت‌هاب ذخیره نمی‌شود.
+    </p>
+
     <p id="login-error" class="error" role="alert" hidden></p>
 
     <p class="hint small">
@@ -57,35 +68,56 @@
 <!-- ============================================================== app view -->
 <div id="app-view" class="app" hidden>
 
-  <header class="topbar">
-    <button id="sidebar-toggle" type="button" class="icon-btn"
-            aria-label="نمایش/پنهان کردن نوار کناری" title="نوار کناری">☰</button>
+  <!-- Two logical rows. On desktop both wrappers are `display: contents`, so the
+       header is the single flat row it always was; under 860px they become real
+       rows and the secondary controls move into the ⋯ menu (see layoutTopbar()
+       in js/app.mjs — the real buttons are MOVED, not duplicated). -->
+  <header id="topbar" class="topbar">
+    <div class="topbar-row topbar-primary">
+      <button id="sidebar-toggle" type="button" class="icon-btn"
+              aria-label="نمایش/پنهان کردن نوار کناری" aria-controls="app-sidebar"
+              aria-expanded="true" title="نوار کناری">☰</button>
 
-    <span id="path-label" class="path-label" dir="auto"></span>
-    <span id="dirty-dot" class="dirty" title="تغییرات ثبت‌نشده" hidden>●</span>
-    <span id="counts" class="counts"></span>
+      <span class="path-wrap">
+        <span id="path-label" class="path-label" dir="auto"></span>
+        <span id="dirty-dot" class="dirty" title="تغییرات ثبت‌نشده" hidden>●</span>
+      </span>
 
-    <span class="spacer"></span>
+      <span id="counts" class="counts"></span>
 
-    <div class="mode-group" role="group" aria-label="حالت نمایش">
-      <button id="mode-edit"    type="button" aria-pressed="true">ویرایش</button>
-      <button id="mode-split"   type="button" aria-pressed="false">کنار هم</button>
-      <button id="mode-preview" type="button" aria-pressed="false">پیش‌نمایش</button>
+      <span class="spacer"></span>
+
+      <button id="commit-btn" type="button" class="primary commit-action-btn" title="ثبت تغییرات (Ctrl+S)" disabled>کامیت</button>
+
+      <button id="more-btn" type="button" class="icon-btn more-btn"
+              aria-label="گزینه‌های بیشتر" aria-haspopup="dialog" title="گزینه‌های بیشتر">⋯</button>
     </div>
 
-    <button id="find-open" type="button" title="جست‌وجو (Ctrl+F)">جست‌وجو</button>
-    <button id="btn-new-file" type="button" title="فایل جدید">فایل جدید</button>
-    <button id="commit-btn" type="button" class="primary commit-action-btn" title="ثبت تغییرات (Ctrl+S)" disabled>کامیت</button>
+    <div class="topbar-row topbar-secondary">
+      <div class="mode-group" role="group" aria-label="حالت نمایش">
+        <button id="mode-edit"    type="button" aria-pressed="true">ویرایش</button>
+        <button id="mode-split"   type="button" aria-pressed="false">کنار هم</button>
+        <button id="mode-preview" type="button" aria-pressed="false">پیش‌نمایش</button>
+      </div>
 
-    <span class="user">
-      <img id="user-avatar" alt="" width="22" height="22">
-      <span id="user-login"></span>
-      <button id="logout-btn" type="button" class="link-btn">خروج</button>
-    </span>
+      <div id="topbar-extra" class="topbar-extra">
+        <button id="find-open" type="button" title="جست‌وجو (Ctrl+F)"
+                aria-expanded="false" aria-controls="find-bar">جست‌وجو</button>
+        <button id="btn-new-file" type="button" title="فایل جدید">فایل جدید</button>
+        <button id="settings-btn" type="button" class="icon-btn" aria-haspopup="dialog"
+                title="تنظیمات" aria-label="تنظیمات">⚙</button>
+
+        <span id="user-box" class="user">
+          <img id="user-avatar" alt="" width="22" height="22">
+          <span id="user-login"></span>
+          <button id="logout-btn" type="button" class="link-btn">خروج</button>
+        </span>
+      </div>
+    </div>
   </header>
 
   <!-- ------------------------------------------------------------- sidebar -->
-  <aside class="sidebar" aria-label="مخزن‌ها و فایل‌ها">
+  <aside id="app-sidebar" class="sidebar" aria-label="مخزن‌ها و فایل‌ها">
     <div class="side-head">
       <input id="repo-filter" type="search" placeholder="فیلتر مخزن‌ها…" dir="auto">
       <button id="refresh-repos" type="button" class="icon-btn" title="بارگذاری دوباره">⟳</button>
@@ -117,12 +149,15 @@
       <button id="find-prev" type="button" title="قبلی (Shift+Enter)" disabled>قبلی</button>
       <button id="find-next" type="button" title="بعدی (Enter)" disabled>بعدی</button>
 
-      <span class="find-divider" aria-hidden="true"></span>
+      <!-- Hidden in preview mode: the preview has nothing to replace. -->
+      <span id="find-replace-group" class="find-replace-group">
+        <span class="find-divider" aria-hidden="true"></span>
 
-      <label class="visually-hidden" for="replace-input">جایگزینی</label>
-      <input id="replace-input" type="text" placeholder="جایگزینی با…" dir="auto" autocomplete="off">
-      <button id="replace-one" type="button" disabled>جایگزینی</button>
-      <button id="replace-all" type="button" disabled>جایگزینی در کل متن</button>
+        <label class="visually-hidden" for="replace-input">جایگزینی</label>
+        <input id="replace-input" type="text" placeholder="جایگزینی با…" dir="auto" autocomplete="off">
+        <button id="replace-one" type="button" disabled>جایگزینی</button>
+        <button id="replace-all" type="button" disabled>جایگزینی در کل متن</button>
+      </span>
       <button id="find-close" type="button" class="icon-btn" title="بستن (Esc)" aria-label="بستن">✕</button>
     </div>
 
@@ -130,9 +165,18 @@
       <strong>فقط خواندنی.</strong> <span id="readonly-why"></span>
     </div>
 
+    <div id="demo-banner" class="banner info" hidden>
+      <strong>حالت نمایشی.</strong>
+      <span>روی مخزن نمونه کار می‌کنید؛ تغییرات ذخیره نمی‌شوند.</span>
+      <button id="demo-login" type="button" class="link-btn">ورود با توکن</button>
+    </div>
+
     <div class="panes">
       <div id="editor-pane" class="pane editor-pane">
-        <div id="editor-toolbar" class="editor-toolbar" role="toolbar" aria-label="قالب‌بندی متن">
+        <!-- Off by default (js/prefs.mjs). The dialog below turns it on; every
+             button here also has a keyboard path, so nothing is unreachable
+             while it is hidden. -->
+        <div id="editor-toolbar" class="editor-toolbar" role="toolbar" aria-label="قالب‌بندی متن" hidden>
           <button type="button" class="tb-btn" data-action="h1" title="سرفصل ۱ (H1)">H1</button>
           <button type="button" class="tb-btn" data-action="h2" title="سرفصل ۲ (H2)">H2</button>
           <button type="button" class="tb-btn" data-action="h3" title="سرفصل ۳ (H3)">H3</button>
@@ -152,17 +196,11 @@
           <button type="button" class="tb-btn" data-action="link" title="پیوند (Ctrl+K)">پیوند</button>
         </div>
         <div class="editor-body">
-          <div id="gutter" class="editor-gutter" aria-hidden="true">
-            <div id="gutter-inner" class="gutter-inner"></div>
-          </div>
-          <div class="editor-stage">
-            <div id="editor-backdrop" class="editor-backdrop" aria-hidden="true"><div id="search-highlights" class="search-highlights"></div></div>
-          <!-- dir="auto" makes the browser resolve direction per paragraph from the
-               first strong character, which is what handles mixed Persian/English.
-               It also implies unicode-bidi: plaintext on a textarea. -->
-          <textarea id="editor" dir="auto" spellcheck="false" wrap="off"
-                    aria-label="متن مارک‌داون" placeholder="فایلی از نوار کناری انتخاب کنید…"></textarea>
-          </div>
+          <!-- CodeMirror (vendored, see js/editor.mjs) mounts here. It replaced a
+               <textarea> + line-number gutter + transparent highlight overlay:
+               all three had to be kept in sync by hand, and after line wrapping
+               the gutter could not be aligned at all. -->
+          <div id="editor-host" class="editor-host"></div>
         </div>
       </div>
       <div id="preview-pane" class="pane preview-pane" hidden>
@@ -222,12 +260,60 @@
   </form>
 </dialog>
 
+<dialog id="settings-dialog" class="dlg settings-dlg" aria-labelledby="settings-title">
+  <div class="dlg-header settings-head">
+    <h2 id="settings-title">تنظیمات</h2>
+    <button id="settings-close" type="button" class="icon-btn" aria-label="بستن">✕</button>
+  </div>
+
+  <div class="settings-body">
+    <label class="check">
+      <input id="set-wrap" type="checkbox">
+      <span>شکستن خطوط بلند (میان‌بر: <b>Alt+Z</b>)</span>
+    </label>
+    <p class="hint small">
+      با شکستن خط، ستون متن در یک عرض خوانا می‌ماند و هیچ‌جا اسکرول افقی لازم
+      نمی‌شود. خاموشش کنید تا خطوط بلند و جدول‌ها یک‌تکه بمانند.
+    </p>
+
+    <label class="check">
+      <input id="set-linenums" type="checkbox">
+      <span>شمارهٔ خطوط کنار ویرایشگر</span>
+    </label>
+
+    <label class="check">
+      <input id="set-toolbar" type="checkbox">
+      <span>نوار قالب‌بندی بالای ویرایشگر (H1، نقل‌قول، فهرست کارها…)</span>
+    </label>
+    <p class="hint small">
+      به‌طور پیش‌فرض خاموش است تا متن جا بیشتری داشته باشد. همهٔ کارهای آن نوار
+      میان‌بر هم دارند: <b>Ctrl+B</b> تیره، <b>Ctrl+I</b> کج، <b>Ctrl+K</b> پیوند،
+      و <b>Enter</b> در فهرست‌ها خودش ادامه می‌دهد.
+    </p>
+    <p class="hint small">
+      تنظیم‌ها فقط در همین مرورگر ذخیره می‌شوند؛ هیچ‌چیز به‌جز آن به گیت‌هاب
+      فرستاده نمی‌شود.
+    </p>
+  </div>
+</dialog>
+
+<!-- Mobile overflow menu. The extra controls are MOVED into #menu-slot at
+     runtime instead of being duplicated (see layoutTopbar() in js/app.mjs). -->
+<dialog id="more-dialog" class="dlg menu-dlg" aria-label="گزینه‌های بیشتر">
+  <div class="menu-head">
+    <h2>گزینه‌ها</h2>
+    <button id="more-close" type="button" class="icon-btn" aria-label="بستن">✕</button>
+  </div>
+  <div id="menu-slot" class="menu-slot"></div>
+  <p class="hint small">هر گزینه‌ای که بزنید این فهرست بسته می‌شود.</p>
+</dialog>
+
 <!-- Vendored UMD libraries. Classic scripts on purpose: the plugin builds are
      CommonJS/UMD, so a bare ESM import of them would throw. -->
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/marked-footnote.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
-<script type="module" src="js/app.mjs?v=1"></script>
+<script type="module" src="js/app.mjs?v=5"></script>
 
 </body>
 </html>

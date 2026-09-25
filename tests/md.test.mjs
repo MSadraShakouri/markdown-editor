@@ -3,7 +3,7 @@
 //
 //   npm install && npm test
 //
-// Run: node --test tests/
+// Run: npm test  (node --test "tests/*.test.mjs")
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
