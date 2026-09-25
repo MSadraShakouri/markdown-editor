@@ -341,9 +341,24 @@ body.mode-split .panes { grid-template-columns: 1fr 1fr; }
 .pane { min-width: 0; min-height: 0; overflow: hidden; }
 .editor-pane { display: flex; }
 
-.preview-pane { overflow-y: auto; border-inline-start: 1px solid var(--border); background: var(--bg); }
+/* `position: relative` is load-bearing, not decoration. marked-footnote puts a
+   screen-reader heading (h2.sr-only) at the END of the rendered document, and
+   .sr-only is `position: absolute`. Without a positioned ancestor here, that
+   element's containing block is the initial containing block, so it is NOT
+   clipped by this pane's `overflow-y: auto` — its static position (the bottom
+   of the preview) stretches the scrollable area of the PAGE. That is why a
+   document with footnotes made the whole page scroll while a document without
+   them did not. Making the pane the containing block puts it back under the
+   pane's own clipping, where it belongs. */
+.preview-pane {
+  position: relative;
+  overflow-y: auto;
+  border-inline-start: 1px solid var(--border);
+  background: var(--bg);
+}
 body.mode-preview .preview-pane { border-inline-start: 0; }
 #preview { padding: 1.25rem 1.5rem; max-width: 60rem; }
+
 
 /* =============================================================== markdown */
 /* 🔴 unicode-bidi does NOT inherit. Setting plaintext on #preview alone does

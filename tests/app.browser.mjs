@@ -258,6 +258,29 @@ ok('relative image rewritten to raw.githubusercontent.com with the Persian dir e
 ok('the rewritten image actually loaded (200 from the stub)',
   await page.$$eval('#preview img', ns => ns.some(i => i.naturalWidth > 0)));
 
+// The bug: a document with footnotes made the PAGE scroll. marked-footnote's
+// screen-reader heading is position:absolute, and with no positioned ancestor in
+// the preview pane its containing block was the initial containing block, so the
+// pane's overflow could not clip it and its static position (the very bottom of
+// the rendered document) stretched the page. Preview mode now scrolls the pane
+// and nothing else.
+const scrollState = await page.evaluate(() => {
+  const de = document.documentElement;
+  const pane = document.getElementById('preview-pane');
+  return {
+    footnotes: document.querySelectorAll('#preview .footnotes').length,
+    srOnly: document.querySelectorAll('#preview .sr-only').length,
+    docOverflow: de.scrollHeight - de.clientHeight,
+    pageOverflowX: de.scrollWidth - de.clientWidth,
+    paneScrollable: pane.scrollHeight > pane.clientHeight,
+  };
+});
+ok('the fixture really has footnotes', scrollState.footnotes > 0 && scrollState.srOnly > 0,
+  JSON.stringify(scrollState));
+ok('footnotes do not make the page scroll (the pane scrolls instead)',
+  scrollState.docOverflow === 0 && scrollState.pageOverflowX === 0 && scrollState.paneScrollable,
+  JSON.stringify(scrollState));
+
 // ------------------------------------------------------------- 6. security
 mark('security');
 // Scan the built DOM instead of the HTML string: sample.md *talks* about these
