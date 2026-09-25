@@ -810,8 +810,14 @@ async function newFile() {
 const F = { query: '', index: -1, count: 0, caseSensitive: false };
 
 function openFind(focusWhich) {
+  // Prefill order: what is selected right now, else the last search — which is
+  // remembered across visits, not just across closes.
+  const selected = ed.getSelection().split('\n')[0].trim();
+  if (selected && selected.length <= 200) F.query = selected;
+  else if (!F.query) F.query = readPref('findQuery');
+
   $('find-bar').hidden = false;
-  if (!F.query) F.query = ed.getSelection().split('\n')[0];
+  $('find-open').setAttribute('aria-expanded', 'true');
   $('find-input').value = F.query;
   runFind();
   const target = $(focusWhich === 'replace' ? 'replace-input' : 'find-input');
@@ -819,16 +825,23 @@ function openFind(focusWhich) {
   target.select();
 }
 
+/**
+ * Close the bar and drop its decorations. The query itself is NOT forgotten:
+ * the last search is a preference now (`find_query`), so reopening the bar —
+ * this session or next visit — brings it back.
+ */
 function closeFind() {
   $('find-bar').hidden = true;
+  $('find-open').setAttribute('aria-expanded', 'false');
   ed.clearSearch();
-  F.query = ''; F.index = -1; F.count = 0;
+  F.index = -1; F.count = 0;
   updateFindStatus();
   if (S.mode !== 'preview') ed.focus();
 }
 
 function runFind() {
   F.query = $('find-input').value;
+  writePref('findQuery', F.query);
   const { count, index } = ed.find(F.query, { caseSensitive: F.caseSensitive });
   F.count = count; F.index = index;
   updateFindStatus();
@@ -1081,7 +1094,13 @@ function wire() {
     applyFormatting(btn.dataset.action);
   });
 
-  $('find-open').addEventListener('click', () => openFind('find'));
+  // Toggle: the search button opens the bar and closes it again. The ✕ button
+  // and Escape do the same. Nothing else closes it — in particular, selecting
+  // text in the editor must not, which is what a document-wide pointerdown
+  // handler used to do here.
+  $('find-open').addEventListener('click', () => {
+    if ($('find-bar').hidden) openFind('find'); else closeFind();
+  });
   $('find-close').addEventListener('click', closeFind);
   $('find-input').addEventListener('input', debounce(runFind, 150));
   $('find-input').addEventListener('keydown', (e) => {
@@ -1098,13 +1117,6 @@ function wire() {
   $('find-prev').addEventListener('click', () => step(-1));
   $('replace-one').addEventListener('click', replaceCurrent);
   $('replace-all').addEventListener('click', replaceAll);
-
-  // Escape and the ✕ button close it; a click anywhere else in the document
-  // closes it too (review ask). Editor clicks included, deliberately.
-  document.addEventListener('pointerdown', (e) => {
-    const bar = $('find-bar');
-    if (!bar.hidden && !bar.contains(e.target)) closeFind();
-  });
 
   document.addEventListener('keydown', onKeydown);
 

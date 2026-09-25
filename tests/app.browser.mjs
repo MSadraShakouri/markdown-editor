@@ -363,13 +363,113 @@ await page.keyboard.down('Control'); await page.keyboard.press('KeyZ'); await pa
 await wait(300);
 ok('Ctrl+Z undoes replace-all (the undo history is a real editor history now)',
   (await doc()) === 'alpha beta alpha', await doc());
+// The reported bug: a document-wide pointerdown handler closed the bar on any
+// click outside it — selecting text in the editor included. Only ✕, Escape and
+// the search button may close it.
+await page.click('.cm-content');            // a real pointerdown inside the editor
+await wait(250);
+const afterEditorClick = await page.evaluate(() => ({
+  open: !document.getElementById('find-bar').hidden,
+  query: document.getElementById('find-input').value,
+  marks: document.querySelectorAll('.cm-hl-match').length,
+}));
+ok('clicking in the editor does not close the find bar', afterEditorClick.open);
+ok('the query and its highlights survive that click',
+  afterEditorClick.query === 'alpha' && afterEditorClick.marks > 0, JSON.stringify(afterEditorClick));
+
 await page.click('#find-close');
-ok('find bar closes', await page.$eval('#find-bar', n => n.hidden));
+ok('the ✕ button closes the find bar', await page.$eval('#find-bar', n => n.hidden));
 ok('closing the find bar clears every match decoration',
   (await page.evaluate(() => document.querySelectorAll('.cm-hl-match').length)) === 0,
   String(await page.evaluate(() => document.querySelectorAll('.cm-hl-match').length)));
+ok('closing does not forget the query', 
+  (await page.evaluate(() => localStorage.getItem('find_query'))) === 'alpha',
+  String(await page.evaluate(() => localStorage.getItem('find_query'))));
 
-// ------------------------------------------------------------ 9. keyboard
+// The search button is a toggle now, and the bar comes back with the last query.
+await page.click('#find-open');
+await wait(300);
+const reopened = await page.evaluate(() => ({
+  open: !document.getElementById('find-bar').hidden,
+  query: document.getElementById('find-input').value,
+  status: document.getElementById('find-status').textContent,
+  aria: document.getElementById('find-open').getAttribute('aria-expanded'),
+}));
+ok('reopening the find bar restores the last query and re-runs it',
+  reopened.open && reopened.query === 'alpha' && /[\d\u06F0-\u06F9]/.test(reopened.status),
+  JSON.stringify(reopened));
+ok('the search button says whether the bar is open', reopened.aria === 'true', reopened.aria);
+
+await page.click('#find-open');             // the same button closes it
+await wait(300);
+ok('pressing search again closes the find bar',
+  await page.$eval('#find-bar', n => n.hidden));
+ok('the stored query outlives the bar being closed',
+  (await page.evaluate(() => localStorage.getItem('find_query'))) === 'alpha');
+
+// Escape stays: it is a deliberate keystroke (the ✕ tooltip names it), not an
+// accidental click, so it keeps working.
+await page.click('#find-open'); await wait(250);
+await page.keyboard.press('Escape'); await wait(250);
+ok('Escape still closes the find bar', await page.$eval('#find-bar', n => n.hidden));
+
+// ---------------------------------------------- 9. settings / formatting bar
+mark('settings');
+const tbDefault = await page.evaluate(() => ({
+  hidden: document.getElementById('editor-toolbar').hidden,
+  display: getComputedStyle(document.getElementById('editor-toolbar')).display,
+  stored: localStorage.getItem('editor_toolbar'),
+}));
+ok('the formatting toolbar is hidden by default',
+  tbDefault.hidden && tbDefault.display === 'none' && tbDefault.stored === null,
+  JSON.stringify(tbDefault));
+
+await page.click('#settings-btn');
+await wait(300);
+const dlg = await page.evaluate(() => ({
+  open: document.getElementById('settings-dialog').open,
+  checked: document.getElementById('set-toolbar').checked,
+}));
+ok('the ⚙ button opens the settings dialog', dlg.open);
+ok('its switch shows the stored state (off)', dlg.checked === false);
+
+await page.click('#set-toolbar');
+await wait(300);
+const tbOn = await page.evaluate(() => ({
+  hidden: document.getElementById('editor-toolbar').hidden,
+  display: getComputedStyle(document.getElementById('editor-toolbar')).display,
+  stored: localStorage.getItem('editor_toolbar'),
+  rows: Math.round(document.querySelector('.editor-toolbar').getBoundingClientRect().height),
+}));
+ok('turning the switch on shows the toolbar and remembers it',
+  !tbOn.hidden && tbOn.display !== 'none' && tbOn.stored === '1' && tbOn.rows > 10,
+  JSON.stringify(tbOn));
+
+await page.click('#settings-close');
+await wait(250);
+ok('the dialog closes', await page.$eval('#settings-dialog', n => !n.open));
+
+// ...and it still formats, which is the only reason to have it
+await setDoc('سرخط آزمایشی\nخط دوم');
+await page.click('.cm-line', { clickCount: 3 });     // select the first line
+await wait(200);
+await page.click('#editor-toolbar [data-action="h1"]');
+await wait(300);
+ok('a toolbar button formats the selected line', (await doc()).startsWith('# '), await doc());
+
+// and the switch turns it off again
+await page.click('#settings-btn'); await wait(250);
+await page.click('#set-toolbar'); await wait(250);
+const tbOff = await page.evaluate(() => ({
+  hidden: document.getElementById('editor-toolbar').hidden,
+  stored: localStorage.getItem('editor_toolbar'),
+}));
+ok('turning it off hides it again', tbOff.hidden && tbOff.stored === '0', JSON.stringify(tbOff));
+// leave it ON: the reload check at the end proves the choice is restored
+await page.click('#set-toolbar'); await wait(250);
+await page.click('#settings-close'); await wait(250);
+
+// ------------------------------------------------------------ 10. keyboard
 mark('keyboard');
 const cdp = await page.createCDPSession();
 // Puppeteer's press() only accepts known key names, so it cannot send
@@ -408,7 +508,7 @@ await wait(250);
 ok('Tab inserts two spaces instead of leaving the editor',
   (await doc()) === 'x  ', JSON.stringify(await doc()));
 
-// -------------------------------------------------------------- 10. save
+// -------------------------------------------------------------- 11. save
 mark('save');
 await setDoc('# عنوان تازه\n\nمتن فارسی ۱۲۳\n');
 await wait(200);
@@ -452,7 +552,7 @@ ok('second save uses the NEW sha from the previous response (the 422 bug)',
   putBodies[0]?.body?.sha === NEW_SHA, putBodies[0]?.body?.sha);
 ok('no spurious conflict dialog across two saves', dialogs.length === 0, dialogs.join(' | '));
 
-// ------------------------------------------------------------- 11. modes
+// ------------------------------------------------------------- 12. modes
 mark('modes');
 await page.click('#mode-preview');
 await wait(250);
@@ -474,11 +574,11 @@ await page.click('#mode-edit');
 await wait(250);
 ok('edit mode hides the preview pane', await page.$eval('#preview-pane', x => x.hidden));
 
-// ------------------------------------------------------- 12. final state
+// ------------------------------------------------------- 13. final state
 ok('no page errors overall', pageErrors.length === 0, pageErrors.join(' | '));
 ok('no console errors overall', consoleErrors.length === 0, consoleErrors.join(' | '));
 
-// ------------------------------------------------- 13. wrap + mobile shell
+// ------------------------------------------------- 14. wrap + mobile shell
 mark('wrap + mobile');
 await page.evaluate(() => { document.getElementById('mode-edit').click(); });
 await wait(300);
@@ -568,6 +668,7 @@ const mobile = await page.evaluate(() => {
     topbarH: Math.round(document.getElementById('topbar').getBoundingClientRect().height),
     findMoved: document.getElementById('find-open').closest('#menu-slot') !== null,
     wrapMoved: document.getElementById('btn-wrap').closest('#menu-slot') !== null,
+    settingsMoved: document.getElementById('settings-btn').closest('#menu-slot') !== null,
     modeInHeader: document.getElementById('mode-split').closest('#topbar') !== null,
     sidebarClosed: document.body.classList.contains('sidebar-collapsed'),
     editorScrollW: scroller.scrollWidth,
@@ -579,18 +680,71 @@ const mobile = await page.evaluate(() => {
 });
 ok('mobile header is two compact rows', mobile.topbarH <= 100, String(mobile.topbarH));
 ok('secondary controls are inside the ⋯ menu on mobile, the mode switch stays put',
-  mobile.findMoved && mobile.wrapMoved && mobile.modeInHeader, JSON.stringify(mobile));
+  mobile.findMoved && mobile.wrapMoved && mobile.settingsMoved && mobile.modeInHeader,
+  JSON.stringify(mobile));
 ok('the editor wraps on a 390px phone: no side scrolling',
   mobile.editorScrollW <= mobile.editorClientW + 1, `${mobile.editorScrollW}/${mobile.editorClientW}`);
 ok('the page itself never scrolls sideways on mobile',
   mobile.pageScrollW <= mobile.pageClientW + 1, `${mobile.pageScrollW}/${mobile.pageClientW}`);
 ok('gutter shrinks on mobile', mobile.gutterW <= 34, String(mobile.gutterW));
+
+// On a phone the settings entry lives in the ⋯ menu, so the menu has to close
+// and the dialog has to open — in that order, from one tap.
+await page.click('#more-btn');
+await wait(400);
+await page.click('#settings-btn');
+await wait(400);
+const fromMenu = await page.evaluate(() => ({
+  settings: document.getElementById('settings-dialog').open,
+  menu: document.getElementById('more-dialog').open,
+}));
+ok('the ⋯ menu closes and settings opens from one tap on mobile',
+  fromMenu.settings && !fromMenu.menu, JSON.stringify(fromMenu));
+await page.click('#settings-close');
+await wait(250);
 await page.screenshot({ path: new URL('shot-mobile.png', import.meta.url).pathname });
 
 // Drafts are per file, and only for the file that was actually edited.
 const drafts = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('draft:')));
 ok('exactly one draft exists, keyed to the edited file',
   drafts.length === 1 && drafts[0].includes('یادداشت'), drafts.join(','));
+
+// ------------------------------------------- 15. a reload keeps the settings
+// The only honest proof that a preference is remembered: throw the page away.
+// window.__editor exists from boot (the editor is wired before login), and the
+// test handle is re-installed by evaluateOnNewDocument, so this needs no session.
+mark('reload');
+await page.setViewport({ width: 1440, height: 900 });
+await page.click('#find-open'); await wait(300);
+await page.type('#find-input', 'واژهٔ ماندگار');
+await wait(400);
+await page.click('#find-close'); await wait(200);
+
+const beforeReload = await page.evaluate(() => ({
+  toolbar: localStorage.getItem('editor_toolbar'),
+  query: localStorage.getItem('find_query'),
+}));
+ok('both choices are in localStorage before the reload',
+  beforeReload.toolbar === '1' && beforeReload.query === 'واژهٔ ماندگار',
+  JSON.stringify(beforeReload));
+
+await page.reload({ waitUntil: 'domcontentloaded' });
+await page.waitForFunction(() => !!window.__editor);
+await wait(500);
+const afterReload = await page.evaluate(() => {
+  // open the find bar through its own handler: the header may be inside a view
+  // that is hidden until login, and a click on a hidden node cannot happen.
+  document.getElementById('find-open').click();
+  return {
+    toolbarHidden: document.getElementById('editor-toolbar').hidden,
+    findBarOpen: !document.getElementById('find-bar').hidden,
+    query: document.getElementById('find-input').value,
+  };
+});
+ok('the toolbar is still on after a reload', afterReload.toolbarHidden === false);
+ok('the find bar reopens with the remembered query',
+  afterReload.findBarOpen && afterReload.query === 'واژهٔ ماندگار',
+  JSON.stringify(afterReload));
 
 mark('end');
 await page.evaluate(() => { document.getElementById('mode-split').click(); });
