@@ -21,6 +21,10 @@ export const PREFS = {
    *  Turned on from the app's settings dialog. */
   toolbar: { key: 'editor_toolbar', fallback: false },
 
+  /** The line-number gutter. ON by default: it is how you find your place in a
+   *  long file, and on mobile it is a couple of characters wide. */
+  lineNumbers: { key: 'editor_line_numbers', fallback: true },
+
   /** The last thing searched for; the find bar reopens with it still there. */
   findQuery: { key: 'find_query', fallback: '' },
 };

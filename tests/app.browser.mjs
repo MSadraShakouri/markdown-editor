@@ -606,23 +606,28 @@ mark('wrap + mobile');
 await page.evaluate(() => { document.getElementById('mode-edit').click(); });
 await wait(300);
 
+await page.click('#settings-btn'); await wait(300);
 const wrapState = await page.evaluate(() => ({
-  pressed: document.getElementById('btn-wrap').getAttribute('aria-pressed'),
+  switchOn: document.getElementById('set-wrap').checked,
+  numbersOn: document.getElementById('set-linenums').checked,
+  wrapButtonGone: !document.getElementById('btn-wrap'),
   wrappingClass: document.querySelector('.cm-content').classList.contains('cm-lineWrapping'),
   scrollW: document.querySelector('.cm-scroller').scrollWidth,
   clientW: document.querySelector('.cm-scroller').clientWidth,
   gutterW: Math.round(document.querySelector('.cm-gutters').getBoundingClientRect().width),
 }));
-ok('soft wrap is on by default', wrapState.pressed === 'true' && wrapState.wrappingClass);
+ok('soft wrap is on by default (settings switch, no header button)',
+  wrapState.switchOn && wrapState.wrappingClass && wrapState.wrapButtonGone, JSON.stringify(wrapState));
+ok('line numbers are on by default too', wrapState.numbersOn === true);
 ok('nothing scrolls sideways with wrap on', wrapState.scrollW <= wrapState.clientW + 1,
   `${wrapState.scrollW}/${wrapState.clientW}`);
 ok('line-number gutter is content-sized, not a fixed 52px', wrapState.gutterW <= 42, String(wrapState.gutterW));
 
 await setDoc(('یک خط بسیار طولانی که باید از عرض ستون بیشتر شود تا شکستن خط معنی پیدا کند و همین‌طور ادامه پیدا کند. '.repeat(3) + '\n').repeat(12));
-await page.click('#btn-wrap');
+await page.click('#set-wrap');
 await wait(400);
 const noWrapState = await page.evaluate(() => ({
-  pressed: document.getElementById('btn-wrap').getAttribute('aria-pressed'),
+  pressed: document.getElementById('set-wrap').checked ? 'true' : 'false',
   stored: localStorage.getItem('editor_wrap'),
   wrappingClass: document.querySelector('.cm-content').classList.contains('cm-lineWrapping'),
   scrollW: document.querySelector('.cm-scroller').scrollWidth,
@@ -639,8 +644,25 @@ const docLines = await page.evaluate(() => window.__editor.lineCount());
 ok('one gutter number per logical line, wrapped rows do not add numbers',
   noWrapState.gutterNumbers === docLines, `${noWrapState.gutterNumbers} numbers / ${docLines} lines`);
 
-await page.click('#btn-wrap');
+await page.click('#set-wrap');            // wrap back on
 await wait(300);
+
+// the line-number switch, from the same dialog
+await page.click('#set-linenums');
+await wait(400);
+const noNums = await page.evaluate(() => ({
+  gutters: document.querySelectorAll('#editor-host .cm-lineNumbers').length,
+  stored: localStorage.getItem('editor_line_numbers'),
+  codeStillThere: !!document.querySelector('#editor-host .cm-content')?.textContent.trim(),
+}));
+ok('turning line numbers off removes the gutter and keeps the text',
+  noNums.gutters === 0 && noNums.stored === '0' && noNums.codeStillThere, JSON.stringify(noNums));
+await page.click('#set-linenums');
+await wait(400);
+ok('turning them back on restores the gutter',
+  (await page.evaluate(() => document.querySelectorAll('#editor-host .cm-lineNumbers').length)) === 1);
+await page.click('#settings-close');
+await wait(250);
 
 // the old overlay drifted when the editor scrolled; decorations cannot
 // Long wrapped filler with the searched token appearing exactly once, at the
@@ -690,7 +712,7 @@ const mobile = await page.evaluate(() => {
   return {
     topbarH: Math.round(document.getElementById('topbar').getBoundingClientRect().height),
     findMoved: document.getElementById('find-open').closest('#menu-slot') !== null,
-    wrapMoved: document.getElementById('btn-wrap').closest('#menu-slot') !== null,
+    noWrapButton: !document.getElementById('btn-wrap'),
     settingsMoved: document.getElementById('settings-btn').closest('#menu-slot') !== null,
     modeInHeader: document.getElementById('mode-split').closest('#topbar') !== null,
     sidebarClosed: document.body.classList.contains('sidebar-collapsed'),
@@ -703,7 +725,7 @@ const mobile = await page.evaluate(() => {
 });
 ok('mobile header is two compact rows', mobile.topbarH <= 100, String(mobile.topbarH));
 ok('secondary controls are inside the ⋯ menu on mobile, the mode switch stays put',
-  mobile.findMoved && mobile.wrapMoved && mobile.settingsMoved && mobile.modeInHeader,
+  mobile.findMoved && mobile.noWrapButton && mobile.settingsMoved && mobile.modeInHeader,
   JSON.stringify(mobile));
 ok('the editor wraps on a 390px phone: no side scrolling',
   mobile.editorScrollW <= mobile.editorClientW + 1, `${mobile.editorScrollW}/${mobile.editorClientW}`);

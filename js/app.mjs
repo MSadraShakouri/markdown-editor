@@ -811,7 +811,8 @@ const F = { query: '', index: -1, count: 0, caseSensitive: false };
 
 function openFind(focusWhich) {
   // Prefill order: what is selected right now, else the last search — which is
-  // remembered across visits, not just across closes.
+  // remembered across visits, not just across closes. In preview mode "what is
+  // selected" is the browser's own selection inside the rendered page.
   const selected = ed.getSelection().split('\n')[0].trim();
   if (selected && selected.length <= 200) F.query = selected;
   else if (!F.query) F.query = readPref('findQuery');
@@ -931,21 +932,36 @@ function applyFormatting(action) {
 function setWrap(on) {
   ed.setWrap(on);
   writePref('wrap', on);
-  updateWrapButton();
+  applyWrapPref();
   if (S.mode === 'split') syncPreviewToEditorCursor();
 }
 
 // ------------------------------------------------------------- app settings
 // One dialog, one place where a preference is turned into a visible change. The
-// defaults live in js/prefs.mjs; the dialog only reflects them.
+// defaults live in js/prefs.mjs; the dialog only reflects them, and everything
+// here works whether or not the dialog has ever been opened (Alt+Z toggles wrap
+// without it, so each switch syncs on open).
 function applyToolbarPref() {
   $('editor-toolbar').hidden = !readPref('toolbar');
-  const box = $('set-toolbar');
-  if (box) box.checked = readPref('toolbar');
+  $('set-toolbar').checked = readPref('toolbar');
+}
+
+function applyWrapPref() {
+  $('set-wrap').checked = readPref('wrap');
+}
+
+function applyLineNumbersPref() {
+  const on = readPref('lineNumbers');
+  ed?.setLineNumbers(on);
+  $('set-linenums').checked = on;
 }
 
 function openSettings() {
-  applyToolbarPref();                    // never open the dialog on a stale value
+  // Never open the dialog on a stale value: Alt+Z and the find bar can have
+  // changed a preference without the dialog knowing.
+  applyToolbarPref();
+  applyWrapPref();
+  applyLineNumbersPref();
   const d = $('settings-dialog');
   if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
 }
@@ -956,13 +972,6 @@ function closeSettings() {
   else d.removeAttribute('open');
 }
 
-function updateWrapButton() {
-  const btn = $('btn-wrap');
-  if (!btn || !ed) return;
-  const on = ed.getWrap();
-  btn.setAttribute('aria-pressed', String(on));
-  btn.classList.toggle('active', on);
-}
 
 // --------------------------------------------------------- responsive shell
 // One source of truth for "are we in the mobile shell". It mirrors the 860px
@@ -984,7 +993,7 @@ function setSidebarOpen(open) {
  */
 function layoutTopbar(mobile = isMobile()) {
   const slot = $(mobile ? 'menu-slot' : 'topbar-extra');
-  for (const id of ['find-open', 'btn-new-file', 'btn-wrap', 'settings-btn', 'user-box']) {
+  for (const id of ['find-open', 'btn-new-file', 'settings-btn', 'user-box']) {
     slot.appendChild($(id));
   }
   setSidebarOpen(!mobile);          // each shell starts in its natural state
@@ -1035,20 +1044,20 @@ function wire() {
   ed = createEditor({
     parent: $('editor-host'),
     wrap: readPref('wrap'),
+    lineNumbers: readPref('lineNumbers'),
     placeholder: 'فایلی از نوار کناری انتخاب کنید…',
     onChange: onEditorInput,
     onCursor: () => { if (S.mode === 'split') syncPreviewToEditorCursor(); },
   });
-  updateWrapButton();
   applyToolbarPref();          // the toolbar's default is off (js/prefs.mjs)
+  applyWrapPref();
+  applyLineNumbersPref();
 
   // Test/debug handle for the browser suites (tests/*.browser.mjs): they need to
   // read and replace the document without typing thousands of characters. It is
   // opt-in, and it exposes nothing privileged — no token, no API client, only the
   // same document surface a user has through the UI.
   if (globalThis.__MDEDITOR_TEST__) globalThis.__editor = ed;
-
-  $('btn-wrap').addEventListener('click', () => setWrap(!ed.getWrap()));
 
   $('mode-edit').addEventListener('click', () => setMode('edit'));
   $('mode-preview').addEventListener('click', () => setMode('preview'));
@@ -1069,6 +1078,11 @@ function wire() {
   $('set-toolbar').addEventListener('change', (e) => {
     writePref('toolbar', e.target.checked);
     applyToolbarPref();
+  });
+  $('set-wrap').addEventListener('change', (e) => setWrap(e.target.checked));
+  $('set-linenums').addEventListener('change', (e) => {
+    writePref('lineNumbers', e.target.checked);
+    applyLineNumbersPref();
   });
 
   $('more-btn').addEventListener('click', openMenu);

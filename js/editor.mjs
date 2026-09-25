@@ -246,21 +246,27 @@ function insertSnippet(view, text, caret) {
  * @param {() => void} [opts.onScroll]
  */
 export function createEditor({
-  parent, doc = '', wrap = true, placeholder: placeholderText = '',
-  onChange, onCursor, onScroll,
+  parent, doc = '', wrap = true, lineNumbers: showLineNumbers = true,
+  placeholder: placeholderText = '', onChange, onCursor, onScroll,
 }) {
   const wrapCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
+  const gutterCompartment = new Compartment();
   let suppressChange = false;
   // Tracked here, not only in the compartments: setValue() rebuilds the state
   // from the extension list below, and a plain `extensions` array would come back
   // with the *initial* wrap/read-only configuration, silently undoing both.
   let wrapOn = !!wrap;
   let readOnlyOn = false;
+  let gutterOn = !!showLineNumbers;
+
+  // The line-number gutter is its own compartment, so turning it off costs one
+  // reconfigure instead of a rebuilt document (and therefore keeps the undo
+  // history, the selection and the scroll position).
+  const gutterExt = () => (gutterOn ? lineNumbers({ formatNumber: (n) => faNum(n) }) : []);
 
   const baseExtensions = [
     history(),
-    lineNumbers({ formatNumber: (n) => faNum(n) }),
     highlightActiveLine(),
     autoDirPlugin,
     searchField,
@@ -307,6 +313,7 @@ export function createEditor({
   const extensions = () => [
     wrapCompartment.of(wrapOn ? EditorView.lineWrapping : []),
     readOnlyCompartment.of(EditorState.readOnly.of(readOnlyOn)),
+    gutterCompartment.of(gutterExt()),
     ...baseExtensions,
   ];
 
@@ -424,6 +431,14 @@ export function createEditor({
       wrapOn = !!on;
       view.dispatch({ effects: wrapCompartment.reconfigure(wrapOn ? EditorView.lineWrapping : []) });
       if (!wrapOn) view.scrollDOM.scrollLeft = 0;
+      view.requestMeasure();
+    },
+    // Same rule as getWrap: report the flag the state was configured with, not
+    // whatever the DOM happens to look like during the next measure pass.
+    getLineNumbers: () => gutterOn,
+    setLineNumbers(on) {
+      gutterOn = !!on;
+      view.dispatch({ effects: gutterCompartment.reconfigure(gutterExt()) });
       view.requestMeasure();
     },
     /** 1-based line number of the caret, used by the preview sync. */
