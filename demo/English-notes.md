@@ -1,8 +1,6 @@
 # Release notes (demo file)
 
-This document starts with a Latin character on purpose: the editor resolves the
-direction of each paragraph from its first strong character, so this whole note
-should stay **left-aligned** inside an RTL app.
+This document starts with a Latin character on purpose: the editor resolves the direction of each paragraph from its first strong character, so this whole note should stay **left-aligned** inside an RTL app.
 
 ## Checklist
 
