@@ -1,0 +1,10 @@
+# The app itself needs no install and no build; only tests/ has dev dependencies.
+node_modules/
+
+# Screenshots written by tests/e2e.browser.mjs.
+tests/shot-*.png
+
+# Editor / OS noise.
+.DS_Store
+Thumbs.db
+*.log

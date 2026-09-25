@@ -2,20 +2,14 @@
 // not installed by default because it downloads a ~150 MB Chrome).
 //
 //   npm i -D puppeteer
-//   npm start                      # or: python3 -m http.server 8080 --bind 0.0.0.0
+//   npm run serve                 # static server on :8080, no build step
 //   node tests/e2e.browser.mjs
 //
-// It drives the REAL flow (login -> tree -> open -> edit -> commit) against a
-// stubbed api.github.com, so no token and no network are needed.
-//
-// Headless-Chrome verification of the built app, driving the REAL flow:
-// login -> repo list -> tree -> open file -> edit -> preview -> commit.
-//
-// api.github.com is intercepted with request interception, so no token and no
-// network are needed. Not part of the shipped repo (needs puppeteer + a server).
-//
-//   (cd markdown-editor && python3 -m http.server 8080 --bind 0.0.0.0 &)
-//   node browser-check.mjs
+// It drives the REAL flow (login -> repo list -> tree -> open file -> edit ->
+// preview -> commit) against a stubbed api.github.com, so no token and no
+// network are needed. Not part of `npm test` (which is jsdom-only): this file
+// needs puppeteer plus a server. Run at a desktop viewport (1440x900) — the
+// mobile layout is a different code path (see the 860px media query).
 import puppeteer from 'puppeteer';
 
 const BASE = 'http://127.0.0.1:8080/';
@@ -404,8 +398,8 @@ await page.evaluate(() => {
 });
 await wait(200);
 ok('dirty indicator appears', await page.$eval('#dirty-dot', x => !x.hidden));
-ok('save button enabled when dirty', await page.$eval('#save-btn', x => !x.disabled));
-await page.click('#save-btn');
+ok('commit button enabled when dirty', await page.$eval('#commit-btn', x => !x.disabled));
+await page.click('#commit-btn');
 await page.waitForFunction(() => document.getElementById('commit-dialog').open, { timeout: 5000 });
 ok('commit dialog opens with a prefilled message',
   (await page.$eval('#commit-message', x => x.value)).length > 0,
@@ -435,7 +429,7 @@ await page.evaluate(() => {
   e.dispatchEvent(new Event('input', { bubbles: true }));
 });
 await wait(200);
-await page.click('#save-btn');
+await page.click('#commit-btn');
 await page.waitForFunction(() => document.getElementById('commit-dialog').open, { timeout: 5000 });
 await page.evaluate(() => document.getElementById('commit-form')
   .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
