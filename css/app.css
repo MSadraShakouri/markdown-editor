@@ -193,13 +193,19 @@ body.sidebar-collapsed .sidebar { display: none; }
 .menu-slot { display: grid; gap: 0.35rem; }
 .menu-slot > * { width: 100%; }
 .menu-slot > button { text-align: start; min-height: 44px; }
-.menu-slot .user { display: flex; align-items: center; justify-content: space-between; padding: 0.3rem 0.1rem; }
+.menu-slot .user { display: flex; align-items: center; gap: 0.5rem; justify-content: space-between; padding: 0.3rem 0.1rem; }
+.menu-slot #user-login { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-label {
   font-weight: 600;
   font-size: 0.9rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* min-width: 0 / flex: 1 1 auto are what let a long path ellipsize. Without
+     them a flex item refuses to shrink below its content, and the filename
+     pushes کامیت and ⋯ off the edge — the bug this header layout exists to fix. */
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 34ch;
   unicode-bidi: plaintext;
 }
