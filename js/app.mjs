@@ -8,6 +8,7 @@ import {
 } from './github.mjs';
 import { renderMarkdown, setRenderContext, splitFrontMatter } from './md.mjs';
 import { DemoGitHub, DEMO_START_FILE } from './demo.mjs';
+import { createEditor } from './editor.mjs';
 
 // --------------------------------------------------------------------- state
 const S = {
@@ -20,7 +21,7 @@ const S = {
   treeTruncated: false,
   expanded: new Set(),
   path: null,
-  content: null,       // what the textarea holds
+  content: null,       // what the editor holds
   baseText: null,      // what the server had when we opened/last saved
   sha: null,
   newline: '\n',
@@ -33,6 +34,11 @@ const S = {
   newFile: false,
   demo: false,         // token-free session: everything works except writing
 };
+
+// The editor surface (js/editor.mjs). Created in wire(); everything below talks
+// to it instead of to a <textarea>.
+let ed = null;
+const WRAP_KEY = 'editor_wrap';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -75,7 +81,7 @@ function saveDraft() {
   if (!S.path || S.readOnly || S.demo) return;
   try {
     localStorage.setItem(draftKey(), JSON.stringify({
-      text: $('editor').value, baseSha: S.sha, savedAt: Date.now(),
+      text: ed.getValue(), baseSha: S.sha, savedAt: Date.now(),
     }));
   } catch {}
 }
@@ -182,7 +188,7 @@ function logout() {
   S.gh = null; S.user = null; S.repo = null; S.branch = null; S.tree = [];
   S.path = null; S.sha = null; S.newFile = false; S.readOnly = false;
   S.baseText = ''; S.dirty = false; S.readOnlyWhy = '';
-  $('editor').value = '';
+  ed.setValue('');
   $('path-label').textContent = '';
   $('token-input').value = '';
   // Without this the header kept the previous session's filename and dirty dot,
@@ -447,8 +453,7 @@ async function openFile(path) {
       S.readOnly = true;
       S.readOnlyWhy = 'این فایل یک اشاره‌گر Git LFS است. ذخیره کردن آن فایل واقعی را خراب می‌کند.';
     }
-    const ed = $('editor');
-    ed.value = body;
+    ed.setValue(body);
     S.baseText = body;
     S.dirty = false;
 
@@ -461,7 +466,6 @@ async function openFile(path) {
     $('path-label').dir = 'auto';
     setRenderContext({ owner: S.repo.owner, repo: S.repo.name, ref: S.branch, dir: dirOf(path) });
     updateEditorState();
-    updateLineNumbers();
     updatePreview();
     markActiveFile(path);
     // On small screens the drawer is an overlay: get out of the way of the file.
@@ -478,7 +482,7 @@ function offerDraft(draft) {
   const when = new Date(draft.savedAt).toLocaleTimeString('fa-IR');
   const yes = confirm(`پیش‌نویس ذخیره‌نشده از ساعت ${when} پیدا شد.\n\n«تأیید» = بازیابی پیش‌نویس\n«لغو» = دور ریختن آن`);
   if (yes) {
-    $('editor').value = draft.text;
+    ed.setValue(draft.text);
     S.dirty = true;
     if (draft.baseSha && draft.baseSha !== S.sha) {
       toast('فایل روی سرور بعد از این پیش‌نویس تغییر کرده است.', 'warn');
@@ -488,6 +492,7 @@ function offerDraft(draft) {
   }
   updateEditorState();
   updatePreview();
+  ed.focus();
 }
 
 const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
@@ -498,9 +503,7 @@ function markActiveFile(path) {
 }
 
 function updateEditorState() {
-  const ed = $('editor');
-  ed.readOnly = S.readOnly;
-  ed.classList.toggle('readonly', S.readOnly);
+  ed?.setReadOnly(S.readOnly);
   $('readonly-banner').hidden = !S.readOnly;
   $('readonly-why').textContent = S.readOnlyWhy;
   $('demo-banner').hidden = !S.demo;
@@ -516,9 +519,9 @@ function updateEditorState() {
   const nBtn = $('btn-new-file');
   nBtn.disabled = !S.repo || S.demo;
   nBtn.title = S.demo ? 'حالت نمایشی — فقط خواندن فایل‌های نمونه' : 'فایل جدید';
-  const words = ed.value.trim() ? ed.value.trim().split(/\s+/).length : 0;
+  if (!ed) return;
   $('counts').textContent =
-    `${words.toLocaleString('fa-IR')} واژه · ${ed.value.length.toLocaleString('fa-IR')} نویسه`;
+    `${ed.wordCount().toLocaleString('fa-IR')} واژه · ${ed.charCount().toLocaleString('fa-IR')} نویسه`;
 }
 
 function setBusy(on) {
@@ -526,15 +529,14 @@ function setBusy(on) {
 }
 
 // -------------------------------------------------------------------- editor
+// Called by js/editor.mjs on every document change. The editor keeps its own
+// line numbers, wrapping and search decorations, so there is nothing to sync
+// here — which is exactly what the old scroll-copying code got wrong.
 let draftTimer = null;
 function onEditorInput() {
-  const ed = $('editor');
-  S.dirty = ed.value !== S.baseText;
+  S.dirty = ed.getValue() !== S.baseText;
   updateEditorState();
-  updateLineNumbers();
-  if (F.query) {
-    runFind({ keepFocus: true });
-  }
+  if (F.query) runFind();
   updatePreviewDebounced();
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => { if (S.dirty) saveDraft(); }, 800);
@@ -551,17 +553,14 @@ function updatePreviewDebounced() {
 function syncPreviewToEditorCursor() {
   const pane = $('preview-pane');
   const box = $('preview');
-  const ed = $('editor');
-  if (!pane || pane.hidden || !box || !ed) return;
+  if (!pane || pane.hidden || !box) return;
 
-  const pos = ed.selectionStart;
-  const before = ed.value.slice(0, pos);
-  const curLine = before.split('\n').length;
+  const curLine = ed.cursorLine();
 
   // Search for the closest rendered element with data-line <= curLine
   const elements = Array.from(box.querySelectorAll('[data-line]'));
   if (!elements.length) {
-    const totalLines = Math.max(1, ed.value.split('\n').length);
+    const totalLines = Math.max(1, ed.lineCount());
     const ratio = curLine / totalLines;
     pane.scrollTop = ratio * (pane.scrollHeight - pane.clientHeight);
     return;
@@ -614,7 +613,7 @@ function updatePreview(opts = {}) {
   if (S.mode === 'edit') { pane.hidden = true; return; }
   pane.hidden = false;
   const box = $('preview');
-  const val = $('editor').value;
+  const val = ed.getValue();
   box.innerHTML = renderMarkdown(val);
   annotatePreviewLines(box, val);
   document.body.classList.toggle('mode-split', S.mode === 'split');
@@ -638,7 +637,7 @@ function setMode(mode) {
   if (mode !== 'edit') {
     updatePreview({ syncCursor: true });
   }
-  if (mode !== 'preview') $('editor').focus();
+  if (mode !== 'preview') { ed.refresh(); ed.focus(); }
 }
 
 // ---------------------------------------------------------------------- save
@@ -648,7 +647,7 @@ async function save() {
     return;
   }
   if (!S.path || S.saving || S.readOnly) return;
-  const text = $('editor').value;
+  const text = ed.getValue();
   if (!S.dirty && !S.newFile) { toast('تغییری برای ذخیره نیست.', 'info'); return; }
 
   const message = await promptCommitMessage(
@@ -721,10 +720,9 @@ async function handleConflict(remoteShaValue) {
     S.sha = remoteShaValue;
     const body = stripBOM(text);
     S.baseText = body;
-    $('editor').value = body;
+    ed.setValue(body);
     S.dirty = false;
     updateEditorState();
-    updateLineNumbers();
     updatePreview();
     toast('نسخهٔ سرور بارگذاری شد. پیش‌نویس شما ذخیره شده است.', 'warn');
   } catch (err) {
@@ -795,79 +793,27 @@ async function newFile() {
   S.newline = '\n';
   S.readOnly = false;
   S.baseText = '';
-  $('editor').value = '';
-  $('editor').readOnly = false;
+  ed.setValue('');
   $('path-label').textContent = clean + ' (فایل جدید)';
   setRenderContext({ owner: S.repo.owner, repo: S.repo.name, ref: S.branch, dir: dirOf(clean) });
   S.dirty = true;
   updateEditorState();
   updatePreview();
-  $('editor').focus();
-}
-
-// ----------------------------------------------------------- line numbers gutter
-let lastLineCount = 0;
-function updateLineNumbers() {
-  const ed = $('editor');
-  const inner = $('gutter-inner');
-  if (!ed || !inner) return;
-  const lines = ed.value.split('\n');
-  const count = Math.max(1, lines.length);
-  if (count !== lastLineCount) {
-    lastLineCount = count;
-    let html = '';
-    for (let i = 1; i <= count; i++) {
-      html += `<div class="gutter-num" data-line="${i}">${i.toLocaleString('fa-IR')}</div>`;
-    }
-    inner.innerHTML = html;
-  }
-}
-
-function syncEditorScroll() {
-  const ed = $('editor');
-  const gutter = $('gutter');
-  const backdrop = $('editor-backdrop');
-  if (gutter) gutter.scrollTop = ed.scrollTop;
-  if (backdrop) {
-    backdrop.scrollTop = ed.scrollTop;
-    backdrop.scrollLeft = ed.scrollLeft;
-  }
-}
-
-function highlightAllMatches() {
-  const backdrop = $('search-highlights');
-  if (!backdrop) return;
-  if (!F.query || !F.matches.length) {
-    backdrop.innerHTML = '';
-    return;
-  }
-  const text = $('editor').value;
-  let html = '';
-  let last = 0;
-  for (let mIdx = 0; mIdx < F.matches.length; mIdx++) {
-    const at = F.matches[mIdx];
-    const before = text.slice(last, at);
-    const match = text.slice(at, at + F.query.length);
-    const cls = mIdx === F.index ? 'hl-match hl-selected' : 'hl-match';
-    html += escapeHtml(before) + `<mark class="${cls}">${escapeHtml(match)}</mark>`;
-    last = at + F.query.length;
-  }
-  html += escapeHtml(text.slice(last));
-  backdrop.innerHTML = html;
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  ed.focus();
 }
 
 // -------------------------------------------------------------- find/replace
-const F = { query: '', index: -1, matches: [], caseSensitive: false };
+// The find bar is this app's own (Persian, in the header). js/editor.mjs paints
+// the matches as real editor decorations, so they scroll and wrap with the text;
+// the old version had to position a separate overlay layer by copying scrollTop
+// and scrollLeft, which drifted as soon as the two layers disagreed.
+const F = { query: '', index: -1, count: 0, caseSensitive: false };
 
 function openFind(focusWhich) {
   $('find-bar').hidden = false;
-  if (!F.query) F.query = selectedText();
+  if (!F.query) F.query = ed.getSelection().split('\n')[0];
   $('find-input').value = F.query;
-  runFind({ keepFocus: true });
+  runFind();
   const target = $(focusWhich === 'replace' ? 'replace-input' : 'find-input');
   target.focus();
   target.select();
@@ -875,147 +821,54 @@ function openFind(focusWhich) {
 
 function closeFind() {
   $('find-bar').hidden = true;
-  highlightAllMatches();
-  if (S.mode !== 'preview') $('editor').focus();
-}
-
-function selectedText() {
-  const ed = $('editor');
-  return ed.value.slice(ed.selectionStart, ed.selectionEnd);
-}
-
-function runFind(opts = {}) {
-  F.query = $('find-input').value;
-  const text = $('editor').value;
-  F.matches = [];
-  if (!F.query) {
-    F.index = -1;
-    highlightAllMatches();
-    updateFindStatus();
-    return;
-  }
-
-  const hay = F.caseSensitive ? text : text.toLowerCase();
-  const needle = F.caseSensitive ? F.query : F.query.toLowerCase();
-
-  let i = hay.indexOf(needle);
-  while (i !== -1 && F.matches.length < 20000) {
-    F.matches.push(i);
-    i = hay.indexOf(needle, i + needle.length);
-  }
-
-  // Preserve closest match to caret if possible
-  if (F.matches.length) {
-    const curPos = $('editor').selectionStart;
-    const closest = F.matches.findIndex((m) => m >= curPos);
-    F.index = closest >= 0 ? closest : 0;
-  } else {
-    F.index = -1;
-  }
-
-  highlightAllMatches();
+  ed.clearSearch();
+  F.query = ''; F.index = -1; F.count = 0;
   updateFindStatus();
-  showMatch(opts);
+  if (S.mode !== 'preview') ed.focus();
+}
+
+function runFind() {
+  F.query = $('find-input').value;
+  const { count, index } = ed.find(F.query, { caseSensitive: F.caseSensitive });
+  F.count = count; F.index = index;
+  updateFindStatus();
 }
 
 function step(delta) {
-  if (!F.matches.length) return;
-  F.index = (F.index + delta + F.matches.length) % F.matches.length;
-  highlightAllMatches();
+  const { count, index } = ed.findStep(delta);
+  F.count = count; F.index = index;
   updateFindStatus();
-  showMatch({ keepFocus: false });
-}
-
-function showMatch(opts = {}) {
-  if (F.index < 0 || !F.matches.length) return;
-  const ed = $('editor');
-  const at = F.matches[F.index];
-
-  // Scroll textarea to make match visible without stealing focus from find-input
-  const before = ed.value.slice(0, at);
-  const line = before.split('\n').length - 1;
-  const styles = getComputedStyle(ed);
-  const lineHeight = parseFloat(styles.lineHeight) || 28;
-  const targetScroll = Math.max(0, (line - 3) * lineHeight);
-  ed.scrollTop = targetScroll;
-  syncEditorScroll();
-
-  // Only setSelectionRange and focus if user requested navigation or replace
-  if (!opts.keepFocus) {
-    ed.focus();
-    ed.setSelectionRange(at, at + F.query.length);
-  }
 }
 
 function updateFindStatus() {
   $('find-status').textContent = !F.query ? ''
-    : F.matches.length
-      ? `${(F.index + 1).toLocaleString('fa-IR')} از ${F.matches.length.toLocaleString('fa-IR')}`
+    : F.count
+      ? `${(F.index + 1).toLocaleString('fa-IR')} از ${F.count.toLocaleString('fa-IR')}`
       : 'یافت نشد';
-  const none = !F.matches.length;
-  $('find-next').disabled = none;
-  $('find-prev').disabled = none;
-  $('replace-one').disabled = none;
-  $('replace-all').disabled = none;
+  const none = !F.count;
+  for (const id of ['find-next', 'find-prev', 'replace-one', 'replace-all']) $(id).disabled = none;
 }
 
-/** Replace the current selection while KEEPING the native undo stack. */
 function replaceCurrent() {
-  if (F.index < 0 || !F.matches.length) return;
-  const ed = $('editor');
-  const r = $('replace-input').value;
-  ed.focus();
-  const at = F.matches[F.index];
-  ed.setSelectionRange(at, at + F.query.length);
-  if (!document.execCommand('insertText', false, r)) {
-    ed.setRangeText(r, at, at + F.query.length, 'end');
-  }
-  S.dirty = ed.value !== S.baseText;
+  if (F.index < 0) return;
+  const { count, index } = ed.replaceCurrent($('replace-input').value);
+  F.count = count; F.index = index;
+  S.dirty = ed.getValue() !== S.baseText;
   updateEditorState();
-  updateLineNumbers();
-  runFindFrom(at + r.length);
+  updateFindStatus();
   updatePreviewDebounced();
 }
 
 function replaceAll() {
   if (!F.query) return;
-  const ed = $('editor');
-  const r = $('replace-input').value;
-  const count = F.matches.length;
-  if (!count) return;
-  const next = ed.value.split(F.query).join(r);
-  ed.focus();
-  ed.setSelectionRange(0, ed.value.length);
-  if (!document.execCommand('insertText', false, next)) ed.value = next;
-  S.dirty = ed.value !== S.baseText;
+  const n = ed.replaceAll($('replace-input').value);
+  if (!n) return;
+  F.count = 0; F.index = -1;
+  S.dirty = ed.getValue() !== S.baseText;
   updateEditorState();
-  updateLineNumbers();
-  runFind({ keepFocus: false });
-  updatePreviewDebounced();
-  toast(`${count.toLocaleString('fa-IR')} مورد جایگزین شد.`, 'success');
-}
-
-/** Re-scan, jumping to the first match at or after `from`. */
-function runFindFrom(from) {
-  const text = $('editor').value;
-  F.matches = [];
-  if (!F.query) {
-    highlightAllMatches();
-    updateFindStatus();
-    return;
-  }
-  const hay = F.caseSensitive ? text : text.toLowerCase();
-  const needle = F.caseSensitive ? F.query : F.query.toLowerCase();
-  let i = hay.indexOf(needle);
-  while (i !== -1 && F.matches.length < 20000) {
-    F.matches.push(i);
-    i = hay.indexOf(needle, i + needle.length);
-  }
-  F.index = F.matches.findIndex((m) => m >= from);
-  if (F.index < 0 && F.matches.length) F.index = 0;
-  highlightAllMatches();
   updateFindStatus();
-  showMatch({ keepFocus: false });
+  updatePreviewDebounced();
+  toast(`${n.toLocaleString('fa-IR')} مورد جایگزین شد.`, 'success');
 }
 
 // ------------------------------------------------------------------ keyboard
@@ -1028,7 +881,11 @@ function onKeydown(e) {
     if (!$('find-bar').hidden) { e.preventDefault(); closeFind(); }
     return;
   }
-  if (!mod || e.altKey) return;
+  if (!mod) {
+    // Alt+Z — the wrap toggle, whenever the editor has focus.
+    if (e.altKey && e.code === 'KeyZ') { e.preventDefault(); setWrap(!ed.getWrap()); }
+    return;
+  }
 
   switch (e.code) {
     case 'KeyS': e.preventDefault(); save(); break;
@@ -1039,192 +896,45 @@ function onKeydown(e) {
     case 'KeyH':
       if (S.mode === 'preview') return;
       e.preventDefault(); openFind('replace'); break;
-    case 'KeyB': if (S.mode !== 'preview') { e.preventDefault(); wrapSelection('**', '**'); } break;
-    case 'KeyI': if (S.mode !== 'preview') { e.preventDefault(); wrapSelection('*', '*'); } break;
-    case 'KeyK': if (S.mode !== 'preview') { e.preventDefault(); insertLink(); } break;
+    case 'KeyB': if (S.mode !== 'preview') { e.preventDefault(); ed.format('bold'); } break;
+    case 'KeyI': if (S.mode !== 'preview') { e.preventDefault(); ed.format('italic'); } break;
   }
 }
 
 
-// ------------------------------------------------------------- formatting toolbar
+// ----------------------------------------------------------- formatting toolbar
+// Every command lives in js/editor.mjs and goes through an editor transaction,
+// so the browser's undo stack keeps working (the textarea version had to use
+// execCommand('insertText') for the same reason).
 function applyFormatting(action) {
-  const ed = $('editor');
-  ed.focus();
-  const { selectionStart: s, selectionEnd: e, value } = ed;
-  const sel = value.slice(s, e);
-
-  switch (action) {
-    case 'h1': toggleLinePrefix('# '); break;
-    case 'h2': toggleLinePrefix('## '); break;
-    case 'h3': toggleLinePrefix('### '); break;
-    case 'bold': wrapSelection('**', '**'); break;
-    case 'italic': wrapSelection('*', '*'); break;
-    case 'strike': wrapSelection('~~', '~~'); break;
-    case 'ul': toggleLinePrefix('- '); break;
-    case 'ol': toggleOrderedList(); break;
-    case 'task': toggleLinePrefix('- [ ] '); break;
-    case 'quote': toggleLinePrefix('> '); break;
-    case 'code': wrapSelection('`', '`'); break;
-    case 'codeblock': insertCodeBlock(); break;
-    case 'table': insertTable(); break;
-    case 'link': insertLink(); break;
-  }
+  ed.format(action);
 }
 
-function toggleLinePrefix(prefix) {
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e, value } = ed;
-  const lineStart = value.lastIndexOf('\n', s - 1) + 1;
-  const lineEnd = (() => { const i = value.indexOf('\n', e); return i < 0 ? value.length : i; })();
-  const block = value.slice(lineStart, lineEnd);
-  const lines = block.split('\n');
-
-  // If all non-empty lines start with prefix, remove it; else add it
-  const allPrefixed = lines.every(l => !l.trim() || l.startsWith(prefix));
-  const newLines = lines.map(l => {
-    if (!l.trim()) return l;
-    if (allPrefixed) {
-      return l.startsWith(prefix) ? l.slice(prefix.length) : l;
-    } else {
-      // Remove any existing heading/list prefix if adding another heading/list
-      let clean = l;
-      if (prefix.startsWith('#')) {
-        clean = clean.replace(/^(#{1,6}\s*)/, '');
-      } else if (prefix.startsWith('- ') || prefix.startsWith('> ')) {
-        clean = clean.replace(/^(\s*[-*+]\s*|\s*>\s*|\s*\d+[.)]\s*)/, '');
-      }
-      return prefix + clean;
-    }
-  });
-
-  const next = newLines.join('\n');
-  ed.setSelectionRange(lineStart, lineEnd);
-  if (!document.execCommand('insertText', false, next)) ed.setRangeText(next, lineStart, lineEnd, 'end');
-  ed.setSelectionRange(lineStart, lineStart + next.length);
-  onEditorInput();
+// --------------------------------------------------------------- wrap mode
+// Soft wrap is on by default: it is the whole reason the editor moved to
+// CodeMirror (no horizontal scrolling, wrap-aware line numbers, highlights that
+// cannot drift). The toggle is for people who want no-wrap — tables and code
+// blocks line up better that way.
+function readWrapPref() {
+  try {
+    const saved = localStorage.getItem(WRAP_KEY);
+    return saved === null ? true : saved === '1';
+  } catch { return true; }
 }
 
-function toggleOrderedList() {
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e, value } = ed;
-  const lineStart = value.lastIndexOf('\n', s - 1) + 1;
-  const lineEnd = (() => { const i = value.indexOf('\n', e); return i < 0 ? value.length : i; })();
-  const block = value.slice(lineStart, lineEnd);
-  const lines = block.split('\n');
-
-  const allNumbered = lines.every(l => !l.trim() || /^\s*\d+[.)]\s+/.test(l));
-  let num = 1;
-  const newLines = lines.map(l => {
-    if (!l.trim()) return l;
-    if (allNumbered) {
-      return l.replace(/^\s*\d+[.)]\s+/, '');
-    } else {
-      const clean = l.replace(/^(\s*[-*+]\s*|\s*>\s*|\s*\d+[.)]\s*)/, '');
-      return `${num++}. ${clean}`;
-    }
-  });
-
-  const next = newLines.join('\n');
-  ed.setSelectionRange(lineStart, lineEnd);
-  if (!document.execCommand('insertText', false, next)) ed.setRangeText(next, lineStart, lineEnd, 'end');
-  ed.setSelectionRange(lineStart, lineStart + next.length);
-  onEditorInput();
+function setWrap(on) {
+  ed.setWrap(on);
+  try { localStorage.setItem(WRAP_KEY, on ? '1' : '0'); } catch {}
+  updateWrapButton();
+  if (S.mode === 'split') syncPreviewToEditorCursor();
 }
 
-function insertCodeBlock() {
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e, value } = ed;
-  const sel = value.slice(s, e) || '// کد اینجا';
-  const text = "```\n" + sel + "\n```";
-  if (!document.execCommand('insertText', false, text)) ed.setRangeText(text, s, e, 'end');
-  ed.setSelectionRange(s + 3, s + 3);
-  onEditorInput();
-}
-
-function insertTable() {
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e } = ed;
-  const tableTpl = `| ستون ۱ | ستون ۲ | ستون ۳ |\n| --- | --- | --- |\n| داده ۱ | داده ۲ | داده ۳ |\n`;
-  if (!document.execCommand('insertText', false, tableTpl)) ed.setRangeText(tableTpl, s, e, 'end');
-  ed.setSelectionRange(s, s + tableTpl.length);
-  onEditorInput();
-}
-
-function wrapSelection(before, after = before) {
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e, value } = ed;
-  const sel = value.slice(s, e);
-  // toggle off if already wrapped
-  if (value.slice(s - before.length, s) === before && value.slice(e, e + after.length) === after) {
-    ed.focus();
-    ed.setSelectionRange(s - before.length, e + after.length);
-    if (!document.execCommand('insertText', false, sel)) ed.setRangeText(sel, s - before.length, e + after.length, 'end');
-  } else {
-    ed.focus();
-    const text = before + (sel || 'متن') + after;
-    if (!document.execCommand('insertText', false, text)) ed.setRangeText(text, s, e, 'end');
-    ed.setSelectionRange(s + before.length, s + before.length + (sel || 'متن').length);
-  }
-  onEditorInput();
-}
-
-function insertLink() {
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e, value } = ed;
-  const sel = value.slice(s, e) || 'متن پیوند';
-  ed.focus();
-  const text = `[${sel}](https://)`;
-  if (!document.execCommand('insertText', false, text)) ed.setRangeText(text, s, e, 'end');
-  ed.setSelectionRange(s + sel.length + 3, s + sel.length + 11);
-  onEditorInput();
-}
-
-// Tab inserts two spaces (and Shift+Tab outdents) instead of leaving the editor.
-function onEditorKeydown(e) {
-  if (e.key !== 'Tab') return;
-  e.preventDefault();
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e2, value } = ed;
-  if (s !== e2 || e.shiftKey) {
-    const lineStart = value.lastIndexOf('\n', s - 1) + 1;
-    const lineEnd = (() => { const i = value.indexOf('\n', e2); return i < 0 ? value.length : i; })();
-    const block = value.slice(lineStart, lineEnd);
-    const next = e.shiftKey
-      ? block.replace(/^ {1,2}/gm, '')
-      : block.replace(/^/gm, '  ');
-    ed.setSelectionRange(lineStart, lineEnd);
-    if (!document.execCommand('insertText', false, next)) ed.setRangeText(next, lineStart, lineEnd, 'end');
-    ed.setSelectionRange(lineStart, lineStart + next.length);
-  } else {
-    if (!document.execCommand('insertText', false, '  ')) ed.setRangeText('  ', s, e2, 'end');
-  }
-  onEditorInput();
-}
-
-// Continue list markers on Enter.
-function onEditorEnter(e) {
-  if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
-  const ed = $('editor');
-  const { selectionStart: s, selectionEnd: e2, value } = ed;
-  if (s !== e2) return;
-  const lineStart = value.lastIndexOf('\n', s - 1) + 1;
-  const line = value.slice(lineStart, s);
-  const m = /^(\s*)([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/.exec(line);
-  if (!m) return;
-  e.preventDefault();
-  // An empty list item: remove the marker instead of adding another.
-  if (line.trim() === m[2] || line.trim() === m[2] + ' ' || (m[3] && line.trim() === m[2] + ' ' + m[3].trim())) {
-    ed.setSelectionRange(lineStart, s);
-    if (!document.execCommand('insertText', false, '\n')) ed.setRangeText('\n', lineStart, s, 'end');
-    onEditorInput();
-    return;
-  }
-  let marker = m[2];
-  const ordered = /^(\d+)([.)])$/.exec(marker);
-  if (ordered) marker = (parseInt(ordered[1], 10) + 1) + ordered[2];
-  const insert = '\n' + m[1] + marker + ' ' + (m[3] ? '[ ] ' : '');
-  if (!document.execCommand('insertText', false, insert)) ed.setRangeText(insert, s, e2, 'end');
-  onEditorInput();
+function updateWrapButton() {
+  const btn = $('btn-wrap');
+  if (!btn || !ed) return;
+  const on = ed.getWrap();
+  btn.setAttribute('aria-pressed', String(on));
+  btn.classList.toggle('active', on);
 }
 
 // --------------------------------------------------------- responsive shell
@@ -1247,7 +957,7 @@ function setSidebarOpen(open) {
  */
 function layoutTopbar(mobile = isMobile()) {
   const slot = $(mobile ? 'menu-slot' : 'topbar-extra');
-  for (const id of ['find-open', 'btn-new-file', 'user-box']) slot.appendChild($(id));
+  for (const id of ['find-open', 'btn-new-file', 'btn-wrap', 'user-box']) slot.appendChild($(id));
   setSidebarOpen(!mobile);          // each shell starts in its natural state
 }
 
@@ -1285,25 +995,30 @@ function wire() {
     }
     S.branch = e.target.value;
     if (S.path) { S.path = null; S.dirty = false; }
-    $('editor').value = '';
+    ed.setValue('');
     S.baseText = '';
     $('path-label').textContent = '';
     updateEditorState();
     await loadTree();
   });
 
-  $('editor').addEventListener('input', onEditorInput);
-  $('editor').addEventListener('scroll', syncEditorScroll);
-  $('editor').addEventListener('click', () => {
-    if (S.mode === 'split') syncPreviewToEditorCursor();
+  // ---- the editor itself -------------------------------------------------
+  ed = createEditor({
+    parent: $('editor-host'),
+    wrap: readWrapPref(),
+    placeholder: 'فایلی از نوار کناری انتخاب کنید…',
+    onChange: onEditorInput,
+    onCursor: () => { if (S.mode === 'split') syncPreviewToEditorCursor(); },
   });
-  $('editor').addEventListener('keyup', (e) => {
-    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
-      if (S.mode === 'split') syncPreviewToEditorCursor();
-    }
-  });
-  $('editor').addEventListener('keydown', onEditorKeydown);
-  $('editor').addEventListener('keydown', onEditorEnter);
+  updateWrapButton();
+
+  // Test/debug handle for the browser suites (tests/*.browser.mjs): they need to
+  // read and replace the document without typing thousands of characters. It is
+  // opt-in, and it exposes nothing privileged — no token, no API client, only the
+  // same document surface a user has through the UI.
+  if (globalThis.__MDEDITOR_TEST__) globalThis.__editor = ed;
+
+  $('btn-wrap').addEventListener('click', () => setWrap(!ed.getWrap()));
 
   $('mode-edit').addEventListener('click', () => setMode('edit'));
   $('mode-preview').addEventListener('click', () => setMode('preview'));
@@ -1323,7 +1038,7 @@ function wire() {
   $('more-dialog').addEventListener('close', () =>
     $('more-btn').setAttribute('aria-expanded', 'false'));
 
-  // On touch, tapping a toolbar button blurs the textarea before the click
+  // On touch, tapping a toolbar button blurs the editor before the click
   // handler runs, and the selection it formats is gone. Refusing the default on
   // pointerdown keeps focus (and the selection) in the editor.
   $('editor-toolbar')?.addEventListener('pointerdown', (e) => {
@@ -1340,7 +1055,7 @@ function wire() {
 
   $('find-open').addEventListener('click', () => openFind('find'));
   $('find-close').addEventListener('click', closeFind);
-  $('find-input').addEventListener('input', debounce(() => runFind({ keepFocus: true }), 150));
+  $('find-input').addEventListener('input', debounce(runFind, 150));
   $('find-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
     if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
@@ -1349,7 +1064,7 @@ function wire() {
     F.caseSensitive = !F.caseSensitive;
     $('find-case').setAttribute('aria-pressed', String(F.caseSensitive));
     $('find-case').classList.toggle('active', F.caseSensitive);
-    runFind({ keepFocus: true });
+    runFind();
   });
   $('find-next').addEventListener('click', () => step(1));
   $('find-prev').addEventListener('click', () => step(-1));

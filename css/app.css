@@ -332,22 +332,6 @@ body.mode-split .panes { grid-template-columns: 1fr 1fr; }
 .pane { min-width: 0; min-height: 0; overflow: hidden; }
 .editor-pane { display: flex; }
 
-#editor {
-  flex: 1;
-  width: 100%;
-  border: 0;
-  outline: none;
-  resize: none;
-  padding: 1rem 1.25rem;
-  background: var(--bg);
-  line-height: 1.85;
-  /* dir="auto" on the element already implies unicode-bidi: plaintext for a
-     textarea; declared again so the intent survives a copy/paste of this rule. */
-  unicode-bidi: plaintext;
-  tab-size: 2;
-}
-#editor.readonly { background: var(--bg-alt); color: var(--fg-muted); }
-
 .preview-pane { overflow-y: auto; border-inline-start: 1px solid var(--border); background: var(--bg); }
 body.mode-preview .preview-pane { border-inline-start: 0; }
 #preview { padding: 1.25rem 1.5rem; max-width: 60rem; }
@@ -565,18 +549,11 @@ body.busy { cursor: progress; }
   .tb-btn { min-height: 34px; padding: 0.3rem 0.55rem; }
   .find-bar button { min-height: 34px; }
 
-  .editor-gutter {
-    flex: 0 0 38px;
-    width: 38px;
-    font-size: 11px;
-  }
-  .gutter-inner {
-    padding-inline-end: 4px;
-  }
-  .editor-backdrop, #editor {
-    padding: 0.75rem 0.6rem !important;
-    font-size: 15px !important;
-  }
+  /* On a phone the reading column is the screen; every pixel of gutter and
+     padding is prose lost. */
+  #editor-host .cm-content { padding-block: 0.75rem; padding-inline: 0.7rem; }
+  #editor-host .cm-editor { font-size: 15px; }
+  #editor-host .cm-lineNumbers .cm-gutterElement { padding-inline: 0.3rem 0.25rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -588,12 +565,12 @@ body.busy { cursor: progress; }
 
 /* ------------------------------------------------ editor layout & toolbar */
 .editor-pane {
-  display: flex !important;
-  flex-direction: column !important;
+  display: flex;
+  flex-direction: column;
   position: relative;
   overflow: hidden;
   background: var(--bg);
-  height: 100%;
+  min-height: 0;
 }
 
 .editor-toolbar {
@@ -652,101 +629,72 @@ body.busy { cursor: progress; }
   min-height: 0;
 }
 
-.editor-gutter {
-  flex: 0 0 52px;
-  width: 52px;
-  background: var(--bg-alt);
-  border-inline-end: 1px solid var(--border);
-  overflow: hidden;
-  user-select: none;
-  position: relative;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.85;
-  color: var(--fg-muted);
-  box-sizing: border-box;
-}
+.editor-host { flex: 1; min-width: 0; min-height: 0; position: relative; }
 
-.gutter-inner {
+/* ============================================================ CodeMirror skin */
+/* Structure (font, line-height, the wrapping column) is set by the theme in
+   js/editor.mjs; everything visual lives here, next to the rest of the app's
+   styling, so the mobile media query below can restyle the editor with no JS.
+
+   #editor-host raises specificity above CodeMirror's injected styles: those are
+   appended to <head> after this file, so equal-specificity rules would lose. */
+#editor-host .cm-editor { height: 100%; background: var(--bg); color: var(--fg); }
+#editor-host .cm-editor.cm-focused { outline: none; }
+
+#editor-host .cm-scroller { overflow-y: auto; overscroll-behavior-y: contain; }
+
+#editor-host .cm-content {
   padding-block: 1rem;
-  padding-inline-end: 8px;
-  text-align: end;
-  box-sizing: border-box;
+  /* The reading column: a comfortable measure, centred in the pane. Padding
+     rather than max-width keeps the lines inside the scroll box, so dragging a
+     selection past the last line still works. */
+  padding-inline: max(1.25rem, calc((100% - 72ch) / 2));
 }
 
-.gutter-num {
-  height: 28px;
-  line-height: 28px;
-  font-size: 13px;
-  opacity: 0.65;
-}
+#editor-host .cm-line { padding: 0; }
 
-.editor-stage {
-  flex: 1;
-  position: relative;
+/* --- gutters: Persian digits, sized by content (never a fixed 52px) ------- */
+#editor-host .cm-gutters {
+  background: var(--bg-alt);
+  color: var(--fg-muted);
+  border-inline-end: 1px solid var(--border);
+  border-inline-start: 0;
+}
+#editor-host .cm-lineNumbers .cm-gutterElement {
+  /* tabular-nums keeps the digits in a column; the width follows the widest
+     number on screen instead of being guessed. */
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78em;
+  padding-inline: 0.5rem 0.35rem;
   min-width: 0;
-  height: 100%;
-  overflow: hidden;
+}
+#editor-host .cm-activeLineGutter { background: transparent; color: var(--fg); }
+
+/* --- active line, caret, selection --------------------------------------- */
+#editor-host .cm-activeLine { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+#editor-host .cm-cursor,
+#editor-host .cm-dropCursor { border-inline-start: 2px solid var(--fg); border-left: 0; }
+#editor-host .cm-editor.cm-focused .cm-selectionBackground,
+#editor-host .cm-selectionBackground {
+  background: color-mix(in srgb, var(--accent) 28%, transparent) !important;
 }
 
-.editor-backdrop {
-  position: absolute;
-  inset: 0;
-  padding: 1rem 1.25rem;
-  overflow: hidden;
-  white-space: pre;
-  word-wrap: normal;
-  pointer-events: none;
-  font-family: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
-  font-size: 16px;
-  line-height: 28px;
-  box-sizing: border-box;
-  color: transparent;
-  unicode-bidi: plaintext;
-  tab-size: 2;
-}
-
-.search-highlights {
-  color: transparent;
-  white-space: pre;
-  unicode-bidi: plaintext;
-  tab-size: 2;
-}
-
-.hl-match {
-  background-color: rgba(234, 179, 8, 0.35);
-  color: transparent;
+/* --- search matches (were a drifting overlay; now real decorations) ------- */
+#editor-host .cm-hl-match {
+  background-color: rgb(234 179 8 / 0.35);
   border-radius: 2px;
 }
-
-.hl-selected {
-  background-color: rgba(249, 115, 22, 0.75);
+#editor-host .cm-hl-current {
+  background-color: rgb(249 115 22 / 0.75);
   box-shadow: 0 0 0 1px #ea580c;
-  color: transparent;
-  border-radius: 2px;
 }
 
-#editor {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  outline: none;
-  resize: none;
-  padding: 1rem 1.25rem;
-  background: transparent;
-  color: var(--fg);
-  font-family: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
-  font-size: 16px;
-  line-height: 28px;
-  unicode-bidi: plaintext;
-  tab-size: 2;
-  box-sizing: border-box;
-  overflow: auto;
-  white-space: pre;
-  word-wrap: normal;
-}
+#editor-host .cm-placeholder { color: var(--fg-muted); }
+#editor-host .cm-content.is-readonly { color: var(--fg-muted); }
+#editor-host .cm-editor:has(.cm-content.is-readonly) { background: var(--bg-alt); }
+
+/* --- markdown skin: the prose leads, the markup recedes ------------------- */
+#editor-host .cm-heading-line { font-weight: 700; }
 
 /* ------------------------------------------------ commit dialog (GitHub-style) */
 .commit-dlg {

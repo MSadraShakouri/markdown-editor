@@ -19,7 +19,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230969da'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif'%3E%E2%80%8F%E2%9C%8E%3C/text%3E%3C/svg%3E">
 
 <link rel="preload" href="fonts/Vazirmatn[wght].woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="css/app.css?v=2">
+<link rel="stylesheet" href="css/app.css?v=3">
 </head>
 <body>
 
@@ -103,6 +103,8 @@
       <div id="topbar-extra" class="topbar-extra">
         <button id="find-open" type="button" title="جست‌وجو (Ctrl+F)">جست‌وجو</button>
         <button id="btn-new-file" type="button" title="فایل جدید">فایل جدید</button>
+        <button id="btn-wrap" type="button" class="btn-toggle" aria-pressed="true"
+                title="شکستن خطوط (Alt+Z)">شکستن خط</button>
 
         <span id="user-box" class="user">
           <img id="user-avatar" alt="" width="22" height="22">
@@ -187,17 +189,11 @@
           <button type="button" class="tb-btn" data-action="link" title="پیوند (Ctrl+K)">پیوند</button>
         </div>
         <div class="editor-body">
-          <div id="gutter" class="editor-gutter" aria-hidden="true">
-            <div id="gutter-inner" class="gutter-inner"></div>
-          </div>
-          <div class="editor-stage">
-            <div id="editor-backdrop" class="editor-backdrop" aria-hidden="true"><div id="search-highlights" class="search-highlights"></div></div>
-          <!-- dir="auto" makes the browser resolve direction per paragraph from the
-               first strong character, which is what handles mixed Persian/English.
-               It also implies unicode-bidi: plaintext on a textarea. -->
-          <textarea id="editor" dir="auto" spellcheck="false" wrap="off"
-                    aria-label="متن مارک‌داون" placeholder="فایلی از نوار کناری انتخاب کنید…"></textarea>
-          </div>
+          <!-- CodeMirror (vendored, see js/editor.mjs) mounts here. It replaced a
+               <textarea> + line-number gutter + transparent highlight overlay:
+               all three had to be kept in sync by hand, and after line wrapping
+               the gutter could not be aligned at all. -->
+          <div id="editor-host" class="editor-host"></div>
         </div>
       </div>
       <div id="preview-pane" class="pane preview-pane" hidden>
@@ -273,7 +269,7 @@
 <script src="vendor/marked.min.js"></script>
 <script src="vendor/marked-footnote.umd.js"></script>
 <script src="vendor/purify.min.js"></script>
-<script type="module" src="js/app.mjs?v=2"></script>
+<script type="module" src="js/app.mjs?v=3"></script>
 
 </body>
 </html>

@@ -142,7 +142,7 @@ function renderFrontMatter(yaml) {
 
 // -------------------------------------------------------------------- render
 /**
- * @param {string} src raw markdown from the textarea
+ * @param {string} src raw markdown from the editor
  * @returns {string} HTML safe for innerHTML
  */
 export function renderMarkdown(src) {
