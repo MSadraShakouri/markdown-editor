@@ -149,12 +149,15 @@
       <button id="find-prev" type="button" title="قبلی (Shift+Enter)" disabled>قبلی</button>
       <button id="find-next" type="button" title="بعدی (Enter)" disabled>بعدی</button>
 
-      <span class="find-divider" aria-hidden="true"></span>
+      <!-- Hidden in preview mode: the preview has nothing to replace. -->
+      <span id="find-replace-group" class="find-replace-group">
+        <span class="find-divider" aria-hidden="true"></span>
 
-      <label class="visually-hidden" for="replace-input">جایگزینی</label>
-      <input id="replace-input" type="text" placeholder="جایگزینی با…" dir="auto" autocomplete="off">
-      <button id="replace-one" type="button" disabled>جایگزینی</button>
-      <button id="replace-all" type="button" disabled>جایگزینی در کل متن</button>
+        <label class="visually-hidden" for="replace-input">جایگزینی</label>
+        <input id="replace-input" type="text" placeholder="جایگزینی با…" dir="auto" autocomplete="off">
+        <button id="replace-one" type="button" disabled>جایگزینی</button>
+        <button id="replace-all" type="button" disabled>جایگزینی در کل متن</button>
+      </span>
       <button id="find-close" type="button" class="icon-btn" title="بستن (Esc)" aria-label="بستن">✕</button>
     </div>
 

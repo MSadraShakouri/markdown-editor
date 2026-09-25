@@ -10,6 +10,7 @@ import { renderMarkdown, setRenderContext, splitFrontMatter } from './md.mjs';
 import { DemoGitHub, DEMO_START_FILE } from './demo.mjs';
 import { createEditor } from './editor.mjs';
 import { readPref, writePref } from './prefs.mjs';
+import { createPreviewSearch } from './pvsearch.mjs';
 
 // --------------------------------------------------------------------- state
 const S = {
@@ -638,6 +639,7 @@ function setMode(mode) {
     updatePreview({ syncCursor: true });
   }
   if (mode !== 'preview') { ed.refresh(); ed.focus(); }
+  retargetFind();
 }
 
 // ---------------------------------------------------------------------- save
@@ -803,21 +805,37 @@ async function newFile() {
 }
 
 // -------------------------------------------------------------- find/replace
-// The find bar is this app's own (Persian, in the header). js/editor.mjs paints
-// the matches as real editor decorations, so they scroll and wrap with the text;
-// the old version had to position a separate overlay layer by copying scrollTop
-// and scrollLeft, which drifted as soon as the two layers disagreed.
+// The find bar is this app's own (Persian, in the header), and it has two
+// engines behind it because it searches two different things:
+//
+//   * edit / split → the source, through js/editor.mjs (CodeMirror decorations,
+//     so matches wrap and scroll with the text and cannot drift);
+//   * preview      → the rendered page, through js/pvsearch.mjs. The rendered
+//     text is not the source text — "**bold**" is not on screen, "bold" is —
+//     so this needed an engine of its own rather than a mode switch.
+//
+// The bar, the query, the counter and the ✕ are shared; only the two lines that
+// do the searching branch. Replace exists only where there is source to change,
+// and its row is hidden in preview mode.
 const F = { query: '', index: -1, count: 0, caseSensitive: false };
+const pv = createPreviewSearch($('preview'));
+
+const inPreview = () => S.mode === 'preview';
+/** The engine for the current mode. */
+const engine = () => (inPreview() ? pv : ed);
 
 function openFind(focusWhich) {
   // Prefill order: what is selected right now, else the last search — which is
   // remembered across visits, not just across closes. In preview mode "what is
   // selected" is the browser's own selection inside the rendered page.
-  const selected = ed.getSelection().split('\n')[0].trim();
+  const selected = (inPreview()
+    ? String(window.getSelection() || '')
+    : ed.getSelection()).split('\n')[0].trim();
   if (selected && selected.length <= 200) F.query = selected;
   else if (!F.query) F.query = readPref('findQuery');
 
   $('find-bar').hidden = false;
+  applyFindMode();
   $('find-open').setAttribute('aria-expanded', 'true');
   $('find-input').value = F.query;
   runFind();
@@ -831,10 +849,17 @@ function openFind(focusWhich) {
  * the last search is a preference now (`find_query`), so reopening the bar —
  * this session or next visit — brings it back.
  */
+/** Show the parts of the bar that make sense in the current mode. The preview has
+ *  no source to rewrite, so its replace row goes away. */
+function applyFindMode() {
+  $('find-replace-group').hidden = inPreview();
+}
+
 function closeFind() {
   $('find-bar').hidden = true;
   $('find-open').setAttribute('aria-expanded', 'false');
-  ed.clearSearch();
+  ed.clearSearch();          // whichever engine was in use, both are cheap to clear
+  pv.clear();
   F.index = -1; F.count = 0;
   updateFindStatus();
   if (S.mode !== 'preview') ed.focus();
@@ -843,15 +868,28 @@ function closeFind() {
 function runFind() {
   F.query = $('find-input').value;
   writePref('findQuery', F.query);
-  const { count, index } = ed.find(F.query, { caseSensitive: F.caseSensitive });
+  const { count, index } = engine().find(F.query, { caseSensitive: F.caseSensitive });
   F.count = count; F.index = index;
   updateFindStatus();
 }
 
 function step(delta) {
-  const { count, index } = ed.findStep(delta);
+  const { count, index } = inPreview() ? pv.step(delta) : ed.findStep(delta);
   F.count = count; F.index = index;
   updateFindStatus();
+}
+
+/**
+ * The mode changed under an open find bar. Re-aim the search at the pane that is
+ * on screen now — the query the user typed is theirs and stays put; what it runs
+ * against is ours. Anything else would either lie (counts for a hidden pane) or
+ * close the bar when nobody asked it to.
+ */
+function retargetFind() {
+  ed.clearSearch();
+  pv.clear();
+  applyFindMode();
+  if (!$('find-bar').hidden) runFind();
 }
 
 function updateFindStatus() {
@@ -864,7 +902,7 @@ function updateFindStatus() {
 }
 
 function replaceCurrent() {
-  if (F.index < 0) return;
+  if (inPreview() || F.index < 0) return;
   const { count, index } = ed.replaceCurrent($('replace-input').value);
   F.count = count; F.index = index;
   S.dirty = ed.getValue() !== S.baseText;
@@ -874,7 +912,7 @@ function replaceCurrent() {
 }
 
 function replaceAll() {
-  if (!F.query) return;
+  if (inPreview() || !F.query) return;
   const n = ed.replaceAll($('replace-input').value);
   if (!n) return;
   F.count = 0; F.index = -1;
@@ -905,10 +943,11 @@ function onKeydown(e) {
     case 'KeyS': e.preventDefault(); save(); break;
     case 'KeyE': e.preventDefault(); setMode(S.mode === 'preview' ? 'edit' : 'preview'); break;
     case 'KeyF':
-      if (S.mode === 'preview') return;        // let the browser find work
+      // Every mode now has something to search: the source in edit/split, the
+      // rendered page in preview.
       e.preventDefault(); openFind('find'); break;
     case 'KeyH':
-      if (S.mode === 'preview') return;
+      if (inPreview()) { toast('در حالت پیش‌نمایش چیزی برای جایگزینی نیست. برای ویرایش، حالت «ویرایش» یا «کنار هم».', 'info'); return; }
       e.preventDefault(); openFind('replace'); break;
     case 'KeyB': if (S.mode !== 'preview') { e.preventDefault(); ed.format('bold'); } break;
     case 'KeyI': if (S.mode !== 'preview') { e.preventDefault(); ed.format('italic'); } break;

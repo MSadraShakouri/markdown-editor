@@ -316,6 +316,7 @@ body.sidebar-collapsed .sidebar { display: none; }
   background: var(--bg-alt);
   flex-wrap: wrap;
 }
+.find-replace-group { display: contents; }   /* children stay flex items of .find-bar */
 .find-bar input {
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--border);
@@ -359,6 +360,18 @@ body.mode-split .panes { grid-template-columns: 1fr 1fr; }
 body.mode-preview .preview-pane { border-inline-start: 0; }
 #preview { padding: 1.25rem 1.5rem; max-width: 60rem; }
 
+/* Preview search matches (js/pvsearch.mjs). Same two colours as the editor's
+   .cm-hl-* so the bar looks the same in every mode. */
+#preview mark.pv-hl-match {
+  background-color: rgb(234 179 8 / 0.35);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0;
+}
+#preview mark.pv-hl-current {
+  background-color: rgb(249 115 22 / 0.75);
+  box-shadow: 0 0 0 1px #ea580c;
+}
 
 /* =============================================================== markdown */
 /* 🔴 unicode-bidi does NOT inherit. Setting plaintext on #preview alone does

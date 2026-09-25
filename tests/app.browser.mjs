@@ -436,7 +436,112 @@ await page.click('#find-open'); await wait(250);
 await page.keyboard.press('Escape'); await wait(250);
 ok('Escape still closes the find bar', await page.$eval('#find-bar', n => n.hidden));
 
-// ---------------------------------------------- 9. settings / formatting bar
+// ------------------------------------------------- 9. searching the PREVIEW
+// The preview shows different text from the source ("**bold**" is not on screen,
+// "bold" is), so it has an engine of its own — and it is the only search there is
+// when the editor is hidden.
+mark('preview search');
+// Its own document: the find section above left the editor holding test text,
+// and the preview renders from source — so give it something long enough that
+// the pane really scrolls, with the matches spread top to bottom.
+await setDoc([
+  '# فایل‌های نمونه',
+  '',
+  'این فایل یک نمونهٔ کوتاه است. فایل دوم کمی پایین‌تر است.',
+  '',
+  // Each filler line is its own paragraph: consecutive lines without a blank
+  // line between them are ONE CommonMark paragraph (soft breaks), which renders
+  // as a single block and would give the pane nothing to scroll.
+  ...Array.from({ length: 40 }, (_, i) => `خط پرکنندهٔ شمارهٔ ${i + 1} برای بلند شدن سند.\n`),
+  '',
+  'و این هم آخرین فایل، در پایین سند.',
+  '',
+].join('\n'));
+await wait(700);
+await page.click('#mode-preview');
+await wait(600);
+await page.click('#find-open');        // opened from the header, not Ctrl+F
+await wait(300);
+const pvOpen = await page.evaluate(() => ({
+  open: !document.getElementById('find-bar').hidden,
+  replaceHidden: document.getElementById('find-replace-group').hidden,
+}));
+ok('the find bar opens in preview mode with the replace row hidden',
+  pvOpen.open && pvOpen.replaceHidden, JSON.stringify(pvOpen));
+
+await page.type('#find-input', 'فایل');
+await wait(600);
+const pvHits = await page.evaluate(() => {
+  const de = document.documentElement;
+  return {
+    marks: document.querySelectorAll('#preview mark.pv-hl-match').length,
+    current: document.querySelectorAll('#preview mark.pv-hl-current').length,
+    status: document.getElementById('find-status').textContent,
+    docOverflow: de.scrollHeight - de.clientHeight,
+  };
+});
+ok('matches are wrapped in the rendered preview, one of them current',
+  pvHits.marks > 1 && pvHits.current === 1 && /از/.test(pvHits.status), JSON.stringify(pvHits));
+ok('searching the preview does not make the page scroll', pvHits.docOverflow === 0,
+  String(pvHits.docOverflow));
+
+const statusBefore = await page.evaluate(() => document.getElementById('find-status').textContent);
+await page.click('#find-next');
+await wait(350);
+ok('next advances to the following match',
+  (await page.evaluate(() => document.getElementById('find-status').textContent)) !== statusBefore,
+  `${statusBefore} → ${await page.evaluate(() => document.getElementById('find-status').textContent)}`);
+
+const paneBefore = await page.evaluate(() => document.getElementById('preview-pane').scrollTop);
+// step until the current match is far enough down that the pane has to scroll
+for (let i = 0; i < 8; i++) {
+  if ((await page.evaluate(() => document.getElementById('preview-pane').scrollTop)) > 0) break;
+  await page.click('#find-next');
+  await wait(350);
+}
+const pvStepped = await page.evaluate(() => {
+  const pane = document.getElementById('preview-pane');
+  const cur = document.querySelector('#preview mark.pv-hl-current');
+  const box = cur.getBoundingClientRect();
+  return {
+    status: document.getElementById('find-status').textContent,
+    paneScrolled: pane.scrollTop > 0,
+    pageScrolled: document.documentElement.scrollTop + window.scrollY,
+    inView: box.top >= 0 && box.bottom <= window.innerHeight,
+  };
+});
+ok('next steps to the following match and scrolls the pane, not the page',
+  pvStepped.paneScrolled && pvStepped.inView && pvStepped.pageScrolled === 0 &&
+  (await page.evaluate(() => document.getElementById('preview-pane').scrollTop)) !== paneBefore,
+  JSON.stringify(pvStepped));
+
+await page.click('#find-close');
+await wait(400);
+const pvClosed = await page.evaluate(() => ({
+  marks: document.querySelectorAll('#preview mark').length,
+  stored: localStorage.getItem('find_query'),
+  html: document.getElementById('preview').innerHTML.includes('<mark'),
+}));
+ok('closing the preview search removes every mark it added',
+  pvClosed.marks === 0 && !pvClosed.html && pvClosed.stored === 'فایل', JSON.stringify(pvClosed));
+
+// A mode change with the bar open re-aims the search instead of closing the bar:
+// the query is the user's, the pane it runs against is ours.
+await page.click('#find-open'); await wait(300);
+await page.click('#mode-edit'); await wait(600);
+const retargeted = await page.evaluate(() => ({
+  open: !document.getElementById('find-bar').hidden,
+  query: document.getElementById('find-input').value,
+  replaceShown: !document.getElementById('find-replace-group').hidden,
+  previewMarks: document.querySelectorAll('#preview mark').length,
+  editorMarks: document.querySelectorAll('#editor-host .cm-hl-match').length,
+}));
+ok('switching to edit keeps the bar open and re-aims it at the source',
+  retargeted.open && retargeted.query === 'فایل' && retargeted.replaceShown &&
+  retargeted.previewMarks === 0 && retargeted.editorMarks > 0, JSON.stringify(retargeted));
+await page.keyboard.press('Escape'); await wait(250);
+
+// ---------------------------------------------- 10. settings / formatting bar
 mark('settings');
 const tbDefault = await page.evaluate(() => ({
   hidden: document.getElementById('editor-toolbar').hidden,
@@ -492,7 +597,7 @@ ok('turning it off hides it again', tbOff.hidden && tbOff.stored === '0', JSON.s
 await page.click('#set-toolbar'); await wait(250);
 await page.click('#settings-close'); await wait(250);
 
-// ------------------------------------------------------------ 10. keyboard
+// ------------------------------------------------------------ 11. keyboard
 mark('keyboard');
 const cdp = await page.createCDPSession();
 // Puppeteer's press() only accepts known key names, so it cannot send
@@ -531,7 +636,7 @@ await wait(250);
 ok('Tab inserts two spaces instead of leaving the editor',
   (await doc()) === 'x  ', JSON.stringify(await doc()));
 
-// -------------------------------------------------------------- 11. save
+// -------------------------------------------------------------- 12. save
 mark('save');
 await setDoc('# عنوان تازه\n\nمتن فارسی ۱۲۳\n');
 await wait(200);
@@ -575,7 +680,7 @@ ok('second save uses the NEW sha from the previous response (the 422 bug)',
   putBodies[0]?.body?.sha === NEW_SHA, putBodies[0]?.body?.sha);
 ok('no spurious conflict dialog across two saves', dialogs.length === 0, dialogs.join(' | '));
 
-// ------------------------------------------------------------- 12. modes
+// ------------------------------------------------------------- 13. modes
 mark('modes');
 await page.click('#mode-preview');
 await wait(250);
@@ -597,11 +702,11 @@ await page.click('#mode-edit');
 await wait(250);
 ok('edit mode hides the preview pane', await page.$eval('#preview-pane', x => x.hidden));
 
-// ------------------------------------------------------- 13. final state
+// ------------------------------------------------------- 14. final state
 ok('no page errors overall', pageErrors.length === 0, pageErrors.join(' | '));
 ok('no console errors overall', consoleErrors.length === 0, consoleErrors.join(' | '));
 
-// ------------------------------------------------- 14. wrap + mobile shell
+// ------------------------------------------------- 15. wrap + mobile shell
 mark('wrap + mobile');
 await page.evaluate(() => { document.getElementById('mode-edit').click(); });
 await wait(300);
@@ -754,7 +859,7 @@ const drafts = await page.evaluate(() => Object.keys(localStorage).filter((k) =>
 ok('exactly one draft exists, keyed to the edited file',
   drafts.length === 1 && drafts[0].includes('یادداشت'), drafts.join(','));
 
-// ------------------------------------------- 15. a reload keeps the settings
+// ------------------------------------------- 16. a reload keeps the settings
 // The only honest proof that a preference is remembered: throw the page away.
 // window.__editor exists from boot (the editor is wired before login), and the
 // test handle is re-installed by evaluateOnNewDocument, so this needs no session.
